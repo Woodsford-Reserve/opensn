@@ -115,6 +115,19 @@ protected:
                                  std::set<int>& location_successors,
                                  std::vector<std::set<std::pair<int, double>>>& cell_successors);
 
+    /**
+   * Populates cell relationships and face orientations for point source calculation.
+   *
+   * \param omega The angular direction vector.
+   * \param location_dependencies Location dependencies.
+   * \param location_successors Location successors.
+   * \param cell_successors Cell successors.
+   */
+  void PopulatePointSourceRelationships(const Vector3& omega,
+                                        std::set<int>& location_dependencies,
+                                        std::set<int>& location_successors,
+                                        std::vector<std::set<std::pair<int, double>>>& cell_successors);
+
   /// Find bi-, tri-, and n-connected strongly connected components (SCCs) in the given graph.
   std::vector<std::vector<Vertex>> FindSCCs(Graph& g);
 
