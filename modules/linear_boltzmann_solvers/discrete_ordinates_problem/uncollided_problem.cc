@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2024 The OpenSn Authors <https://open-sn.github.io/opensn/>
 // SPDX-License-Identifier: MIT
 
-#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/point_source_problem.h"
+#include "modules/problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/uncollided_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/point_source/point_source.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/reflecting_boundary.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/vacuum_boundary.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/isotropic_boundary.h"
-#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/spds/cbc.h"
-#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/spds/aah.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_vecops.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/source_functions/source_function.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
@@ -23,47 +22,65 @@
 namespace opensn
 {
 
-OpenSnRegisterObjectInNamespace(lbs, PointSourceProblem);
+OpenSnRegisterObjectInNamespace(lbs, UncollidedProblem);
 
-PointSourceProblem::PointSourceProblem(const std::string& name,
+UncollidedProblem::UncollidedProblem(const std::string& name,
                                        std::shared_ptr<MeshContinuum> grid_ptr)
   : LBSProblem(name, grid_ptr)
 {
 }
 
 InputParameters
-PointSourceProblem::GetInputParameters()
+UncollidedProblem::GetInputParameters()
 {
-  InputParameters params = LBSProblem::GetInputParameters();
+  InputParameters params = Problem::GetInputParameters();
 
-  params.SetClassName("PointSourceProblem");
+  params.SetClassName("UncollidedProblem");
 
-  params.ChangeExistingParamToOptional("name", "LBSPointSourceProblem");
+  params.ChangeExistingParamToOptional("name", "LBSUncollidedProblem");
+
+  params.AddRequiredParameter<std::shared_ptr<MeshContinuum>>("mesh", "Mesh");
+
+  params.AddRequiredParameter<size_t>("num_groups", "The total number of groups within the solver");
+
+  params.AddRequiredParameterArray("xs_map",
+                                   "Cross-section map from block IDs to cross-section objects.");
+
+  params.AddOptionalParameterArray<std::shared_ptr<PointSource>>(
+    "point_sources", {}, "An array of point sources.");
+
+  params.AddOptionalParameterArray(
+    "boundary_conditions", {}, "An array containing tables for each boundary specification.");
+  params.LinkParameterToBlock("boundary_conditions", "BoundaryOptionsBlock");
+
+  params.AddOptionalParameterBlock(
+    "options", ParameterBlock(), "Block of options. See <TT>OptionsBlock</TT>.");
+  params.LinkParameterToBlock("options", "OptionsBlock");
 
   return params;
 }
 
-std::shared_ptr<PointSourceProblem>
-PointSourceProblem::Create(const ParameterBlock& params)
+std::shared_ptr<UncollidedProblem>
+UncollidedProblem::Create(const ParameterBlock& params)
 {
   auto& factory = opensn::ObjectFactory::GetInstance();
-  return factory.Create<PointSourceProblem>("lbs::PointSourceProblem", params);
+  return factory.Create<UncollidedProblem>("lbs::UncollidedProblem", params);
 }
 
-PointSourceProblem::PointSourceProblem(const InputParameters& params)
+UncollidedProblem::UncollidedProblem(const InputParameters& params)
   : LBSProblem(params)
 {
-
+  std::cout << "!!!!! HERE !!!!!" << std::endl;
 }
 
-PointSourceProblem::~PointSourceProblem()
+UncollidedProblem::~UncollidedProblem()
 {
 }
 
 void
-PointSourceProblem::Initialize()
+UncollidedProblem::Initialize()
 {
-  CALI_CXX_MARK_SCOPE("PointSourceProblem::Initialize");
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::Initialize");
 
   LBSProblem::Initialize();
 
@@ -71,9 +88,9 @@ PointSourceProblem::Initialize()
 }
 
 void
-PointSourceProblem::InitializeBoundaries()
+UncollidedProblem::InitializeBoundaries()
 {
-  CALI_CXX_MARK_SCOPE("PointSourceProblem::InitializeBoundaries");
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::InitializeBoundaries");
 
   // Determine boundary-ids involved in the problem
   std::set<uint64_t> global_unique_bids_set;
@@ -169,17 +186,6 @@ PointSourceProblem::InitializeBoundaries()
   //     }
   //   } // non-defaulted
   // } // for bndry id
-}
-
-void
-PointSourceProblem::ZeroOutflowBalanceVars(LBSGroupset& groupset)
-{
-  CALI_CXX_MARK_SCOPE("PointSourceProblem::ZeroOutflowBalanceVars");
-
-  for (const auto& cell : grid_->local_cells)
-    for (int f = 0; f < cell.faces.size(); ++f)
-      for (auto& group : groupset.groups)
-        cell_transport_views_[cell.local_id].ZeroOutflow(f, group.id);
 }
 
 } // namespace opensn
