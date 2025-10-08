@@ -9,6 +9,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/smm_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/uncollided_problem.h"
 #include "modules/linear_boltzmann_solvers/solvers/steady_state_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/pi_keigen_solver.h"
@@ -638,6 +639,56 @@ WrapLBS(py::module& slv)
     )",
     py::arg("bnd_names")
   );
+
+
+  // uncollided flux solver
+  auto do_uncollided_problem = py::class_<UncollidedProblem, std::shared_ptr<UncollidedProblem>,
+                                          LBSProblem>(
+    slv,
+    "UncollidedProblem",
+    R"(
+    Base class for discrete ordinates problems in Cartesian geometry.
+
+    This class implements the algorithms necessary to compute the uncollided flux from a point source.
+
+    Wrapper of :cpp:class:`opensn::UncollidedProblem`.
+    )"
+  );
+  do_uncollided_problem.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        return UncollidedProblem::Create(kwargs_to_param_block(params));
+      }
+    ),
+    R"(
+    Construct an uncollided flux problem with Cartesian geometry.
+
+    Parameters
+    ----------
+    mesh : MeshContinuum
+        The spatial mesh.
+    num_groups : int
+        The total number of energy groups.
+    xs_map : List[Dict], default=[]
+        A list of mappings from block ids to cross-section definitions.
+    point_sources: List[pyopensn.source.PointSource], default=[]
+        A list of point sources.
+    options : Dict, default={}
+        A block of optional configuration parameters. See `SetOptions` for available settings.
+    )"
+  );
+  do_uncollided_problem.def(
+    "Initialize",
+    &UncollidedProblem::Initialize,
+    "Initialize the uncollided flux calculation."
+  );
+  do_uncollided_problem.def(
+    "Execute",
+    &UncollidedProblem::Execute,
+    "Execute the uncollided flux calculation."
+  );
+
 
   // discrete ordinates curvilinear problem
   auto do_curvilinear_problem = py::class_<DiscreteOrdinatesCurvilinearProblem,

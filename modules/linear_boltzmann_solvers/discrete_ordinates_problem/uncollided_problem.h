@@ -11,27 +11,26 @@ namespace opensn
 {
 
 /**
- * Base class for Discrete Ordinates solvers. This class mostly establishes utilities related to
- * sweeping. From here we can derive a steady-state, transient, adjoint, and k-eigenvalue solver.
+ * Base class for Uncollided Flux calculation.
  */
-class PointSourceProblem : public LBSProblem
+class UncollidedProblem : public LBSProblem
 {
 
 public:
   /// Static registration based constructor.
-  explicit PointSourceProblem(const InputParameters& params);
-  ~PointSourceProblem() override;
+  explicit UncollidedProblem(const InputParameters& params);
+  ~UncollidedProblem() override;
 
   void Initialize() override;
+
+  void Execute() {};
 
   void ReorientAdjointSolution() override {};
   std::pair<size_t, size_t> GetNumPhiIterativeUnknowns() override {};
 
-  /// Zeroes all the outflow data-structures required to compute balance.
-  void ZeroOutflowBalanceVars(LBSGroupset& groupset);
 
 protected:
-  explicit PointSourceProblem(const std::string& name,
+  explicit UncollidedProblem(const std::string& name,
                               std::shared_ptr<MeshContinuum> grid_ptr);
 
   void InitializeBoundaries() override;
@@ -41,7 +40,7 @@ protected:
 
 public:
   static InputParameters GetInputParameters();
-  static std::shared_ptr<PointSourceProblem> Create(const ParameterBlock& params);
+  static std::shared_ptr<UncollidedProblem> Create(const ParameterBlock& params);
 };
 
 } // namespace opensn

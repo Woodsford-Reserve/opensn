@@ -451,12 +451,12 @@ SPDS::PopulateCellRelationships(const Vector3& omega,
 }
 
 void
-SPDS::PopulatePointSourceRelationships(const Vector3& point_source,
-                                       std::set<int>& location_dependencies,
-                                       std::set<int>& location_successors,
-                                       std::vector<std::set<std::pair<int, double>>>& cell_successors)
+SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
+                                      std::set<int>& location_dependencies,
+                                      std::set<int>& location_successors,
+                                      std::vector<std::set<std::pair<int, double>>>& cell_successors)
 {
-  CALI_CXX_MARK_SCOPE("SPDS::PopulatePointSourceRelationships");
+  CALI_CXX_MARK_SCOPE("SPDS::PopulateUncollidedRelationships");
 
   constexpr double tolerance = 1.0e-16;
 
