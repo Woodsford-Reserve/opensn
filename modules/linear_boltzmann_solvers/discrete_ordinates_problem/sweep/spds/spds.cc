@@ -452,9 +452,7 @@ SPDS::PopulateCellRelationships(const Vector3& omega,
 
 void
 SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
-                                      std::set<int>& location_dependencies,
-                                      std::set<int>& location_successors,
-                                      std::vector<std::set<std::pair<int, double>>>& cell_successors)
+                                      std::vector<std::set<int>>& cell_successors)
 {
   CALI_CXX_MARK_SCOPE("SPDS::PopulateUncollidedRelationships");
 
@@ -496,7 +494,7 @@ SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
 
         cell_face_orientations_[cell.local_id][f] = orientation;
 
-        if (face.has_neighbor and grid_->IsCellLocal(face.neighbor_id))
+        if (face.has_neighbor)
         {
           const auto& adj_cell = grid_->cells[face.neighbor_id];
           const auto adj_face_idx = face.GetNeighborAdjacentFaceIndex(grid_.get());
@@ -515,34 +513,7 @@ SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
               break;
           }
         }
-      } // if face owned
-      /*else if (face.has_neighbor and not grid_->IsCellLocal(face.neighbor_id))
-      {
-        const auto& adj_cell = grid_->cells[face.neighbor_id];
-        const auto adj_face_idx = face.GetNeighborAdjacentFaceIndex(grid_.get());
-        const auto& adj_face = adj_cell.faces[adj_face_idx];
-
-        auto& cur_face_ori = cell_face_orientations_[cell.local_id][f];
-
-        const double adj_mu = omega(face.centroid).Dot(adj_face.normal);
-        if (adj_mu > tolerance)
-          orientation = FOOUTGOING;
-        else if (adj_mu < -tolerance)
-          orientation = FOINCOMING;
-
-        switch (orientation)
-        {
-          case FOPARALLEL:
-            cur_face_ori = FOPARALLEL;
-            break;
-          case FOINCOMING:
-            cur_face_ori = FOOUTGOING;
-            break;
-          case FOOUTGOING:
-            cur_face_ori = FOINCOMING;
-            break;
-        }
-      } // if not face owned locally at all*/
+      }
 
       ++f;
     } // for face
@@ -562,23 +533,10 @@ SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
         // If it is a cell and not bndry
         if (face.has_neighbor)
         {
-          // If it is in the current location
-          if (face.IsNeighborLocal(grid_.get()))
-          {
-            const auto weight = mu * face.area;
-            cell_successors[c].insert(std::make_pair(face.GetNeighborLocalID(grid_.get()), weight));
-          }
-          else
-            location_successors.insert(face.GetNeighborPartitionID(grid_.get()));
+          cell_successors[c].insert(face.GetNeighborLocalID(grid_.get()));
         }
       }
-      // If not outgoing determine what it is dependent on
-      else if (cell_face_orientations_[cell.local_id][f] == FOINCOMING)
-      {
-        // if it is a cell and not bndry
-        if (face.has_neighbor and not face.IsNeighborLocal(grid_.get()))
-          location_dependencies.insert(face.GetNeighborPartitionID(grid_.get()));
-      }
+
       ++f;
     } // for face
   } // for cell

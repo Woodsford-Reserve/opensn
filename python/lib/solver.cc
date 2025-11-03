@@ -535,6 +535,8 @@ WrapLBS(py::module& slv)
         A list containing tables for each boundary specification.
     point_sources: List[pyopensn.source.PointSource], default=[]
         A list of point sources.
+    near_source: List[pyopensn.logvol.LogicalVolume], default=[]
+        A list of near source region logical volumes.
     volumetric_sources: List[pyopensn.source.VolumetricSource], default=[]
         A list of volumetric sources.
     )"

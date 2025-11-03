@@ -4,6 +4,7 @@
 #pragma once
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/sweep.h"
+#include "framework/mesh/logical_volume/logical_volume.h"
 #include "framework/data_types/vector3.h"
 #include <boost/graph/directed_graph.hpp>
 #include <memory>
@@ -53,9 +54,7 @@ public:
    * \param cell_successors Cell successors.
    */
   void PopulateUncollidedRelationships(const Vector3& point_source,
-                                       std::set<int>& location_dependencies,
-                                       std::set<int>& location_successors,
-                                       std::vector<std::set<std::pair<int, double>>>& cell_successors);
+                                       std::vector<std::set<int>>& cell_successors);
 
   /**
    * Return a reference to the Sweep-Plane Local Subgrid (SPLS) associated with this SPDS. A SPLS
