@@ -45,6 +45,19 @@ public:
   const Vector3& GetOmega() const { return omega_; }
 
   /**
+   * Populates uncollided relationships and face orientations for point source calculation.
+   *
+   * \param point_source The point source position vector.
+   * \param location_dependencies Location dependencies.
+   * \param location_successors Location successors.
+   * \param cell_successors Cell successors.
+   */
+  void PopulateUncollidedRelationships(const Vector3& point_source,
+                                       std::set<int>& location_dependencies,
+                                       std::set<int>& location_successors,
+                                       std::vector<std::set<std::pair<int, double>>>& cell_successors);
+
+  /**
    * Return a reference to the Sweep-Plane Local Subgrid (SPLS) associated with this SPDS. A SPLS
    * (“spills”) is a contiguous collection of cells that is the lowest level in the SPDS hierarchy.
    * The intent is that the locations responsible for executing sweeps on this collection of cells
@@ -114,19 +127,6 @@ protected:
                                  std::set<int>& location_dependencies,
                                  std::set<int>& location_successors,
                                  std::vector<std::set<std::pair<int, double>>>& cell_successors);
-
-    /**
-   * Populates cell relationships and face orientations for point source calculation.
-   *
-   * \param omega The angular direction vector.
-   * \param location_dependencies Location dependencies.
-   * \param location_successors Location successors.
-   * \param cell_successors Cell successors.
-   */
-  void PopulateUncollidedRelationships(const Vector3& omega,
-                                       std::set<int>& location_dependencies,
-                                       std::set<int>& location_successors,
-                                       std::vector<std::set<std::pair<int, double>>>& cell_successors);
 
   /// Find bi-, tri-, and n-connected strongly connected components (SCCs) in the given graph.
   std::vector<std::vector<Vertex>> FindSCCs(Graph& g);

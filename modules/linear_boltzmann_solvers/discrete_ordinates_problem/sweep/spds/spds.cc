@@ -469,7 +469,9 @@ SPDS::PopulateUncollidedRelationships(const Vector3& point_source,
     cell_face_orientations_[cell.local_id].assign(cell.faces.size(), FOPARALLEL);
 
   auto omega = [&point_source](Vector3& centroid) {
-    return (centroid - point_source).Normalized();
+    double norm = (centroid - point_source).Norm();
+    return norm == 0. ? Vector3(0., 0., 0.) 
+                      : (centroid - point_source).Normalized();
   };
 
   for (auto& cell : grid_->local_cells)
