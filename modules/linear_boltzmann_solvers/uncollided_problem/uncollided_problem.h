@@ -5,6 +5,7 @@
 
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
+#include "framework/mesh/logical_volume/logical_volume.h"
 
 namespace opensn
 {
@@ -23,6 +24,10 @@ public:
 protected:
   explicit UncollidedProblem(const std::string& name,
                              std::shared_ptr<MeshContinuum> grid_ptr);
+
+  void InitializeNearSourceRegions(const InputParameters& params);
+
+  std::vector<std::shared_ptr<LogicalVolume>> near_source_logvols_;
 
 public:
   static InputParameters GetInputParameters();
