@@ -46,17 +46,6 @@ public:
   const Vector3& GetOmega() const { return omega_; }
 
   /**
-   * Populates uncollided relationships and face orientations for point source calculation.
-   *
-   * \param point_source The point source position vector.
-   * \param location_dependencies Location dependencies.
-   * \param location_successors Location successors.
-   * \param cell_successors Cell successors.
-   */
-  void PopulateUncollidedRelationships(const Vector3& point_source,
-                                       std::vector<std::set<int>>& cell_successors);
-
-  /**
    * Return a reference to the Sweep-Plane Local Subgrid (SPLS) associated with this SPDS. A SPLS
    * (“spills”) is a contiguous collection of cells that is the lowest level in the SPDS hierarchy.
    * The intent is that the locations responsible for executing sweeps on this collection of cells

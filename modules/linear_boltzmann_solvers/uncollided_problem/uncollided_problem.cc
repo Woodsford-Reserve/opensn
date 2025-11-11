@@ -2,8 +2,9 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/reflecting_boundary.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/vacuum_boundary.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/isotropic_boundary.h"
-#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/spds/spds.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/point_source/point_source.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
+#include "framework/mesh/raytrace/raytracer.h"
 #include "framework/logging/log.h"
 #include "framework/logging/log_exceptions.h"
 #include "framework/utils/timer.h"
@@ -11,6 +12,7 @@
 #include "framework/object_factory.h"
 #include "framework/runtime.h"
 #include "caliper/cali.h"
+#include <boost/graph/topological_sort.hpp>
 #include <iomanip>
 
 namespace opensn
@@ -47,32 +49,62 @@ UncollidedProblem::Create(const ParameterBlock& params)
 }
 
 
-
 UncollidedProblem::UncollidedProblem(const InputParameters& params)
   : LBSProblem(params)
 {
-  std::cout << "I'm an uncollided problem!" << std::endl;
+  Initialize();
 
+  // Initialize near-source regions
   InitializeNearSourceRegions(params);
 
-  // number of mesh cells
   size_t num_loc_cells = grid_->local_cells.size();
 
-  // loop over point sources
-  for (auto pt : GetPointSources()) {
+  // Loop over point sources
+  for (int i = 0; i < GetPointSources().size(); ++i) {
+    const auto pt = GetPointSources()[i];
+
+    // Ensure point source is inside near-source region
     const auto pt_loc = pt->GetLocation();
+    if (!near_source_logvols_[i]->Inside(pt_loc))
+      throw std::runtime_error("One or more point sources is outside "
+                               "its near-source region.");
 
-    // instantiate SPDS object
-    const auto sweep_order = std::make_shared<SPDS>(pt_loc, grid_);
+    // Populate uncollided cell relationships
+    std::vector<std::set<std::pair<int, double>>> cell_successors(num_loc_cells);
+    PopulateCellRelationships(pt_loc, cell_successors);
 
-    // populate uncollided cell relationships
-    std::vector<std::set<int>> cell_successors(num_loc_cells);
-    sweep_order->PopulateUncollidedRelationships(pt_loc, cell_successors);
+    // Create local cell graph
+    Graph local_cell_graph(num_loc_cells);
 
-    for (const auto& cell : grid_->local_cells) {
-        std::cout << cell.local_id << ":  "
-                  << near_source_logvols_[0]->Inside(cell.centroid) << std::endl;
+    for (size_t c = 0; c < num_loc_cells; ++c)
+      for (const auto& successor : cell_successors[c])
+        boost::add_edge(c, successor.first, successor.second, local_cell_graph);
+
+    // Generate topological ordering
+    spls_.clear();
+    boost::topological_sort(local_cell_graph, std::back_inserter(spls_)); // NOLINT
+    std::reverse(spls_.begin(), spls_.end());
+    if (spls_.empty())
+    {
+      throw std::logic_error("UncollidedProblem: Cyclic dependencies found in the local cell graph.\n"
+                             "Cycles need to be allowed by the calling application.");
     }
+
+    // Separate SPLS into near-source and bulk region
+    near_spls_.clear(); bulk_spls_.clear();
+
+    for (int c : spls_) {
+      const auto& cell = grid_->local_cells[c];
+      if (near_source_logvols_[i]->Inside(cell.centroid)) 
+        near_spls_.push_back(c);
+      else 
+        bulk_spls_.push_back(c);
+    }
+    
+    // Calculate uncollided flux
+    RaytraceNearSourceRegion();
+
+
   }
 }
 
@@ -88,13 +120,133 @@ UncollidedProblem::Initialize()
   LBSProblem::Initialize();
 }
 
+
+void
+UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
+                                             std::vector<std::set<std::pair<int, double>>>& cell_successors)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::PopulateCellRelationships");
+
+  constexpr double tolerance = 1.0e-16;
+
+  constexpr auto FOPARALLEL = FaceOrientation::PARALLEL;
+  constexpr auto FOINCOMING = FaceOrientation::INCOMING;
+  constexpr auto FOOUTGOING = FaceOrientation::OUTGOING;
+
+  cell_face_orientations_.assign(grid_->local_cells.size(), {});
+  for (auto& cell : grid_->local_cells)
+    cell_face_orientations_[cell.local_id].assign(cell.faces.size(), FOPARALLEL);
+
+  auto omega = [&point_source](Vector3& centroid) {
+    double norm = (centroid - point_source).Norm();
+    return norm == 0. ? Vector3(0., 0., 0.) 
+                      : (centroid - point_source).Normalized();
+  };
+
+  for (auto& cell : grid_->local_cells)
+  {
+    size_t f = 0;
+    for (auto& face : cell.faces)
+    {
+      // Determine if the face is incident
+      FaceOrientation orientation = FOPARALLEL;
+      const double mu = omega(face.centroid).Dot(face.normal);
+
+      bool owns_face = true;
+      if (face.has_neighbor and cell.global_id > face.neighbor_id)
+        owns_face = false;
+
+      if (owns_face)
+      {
+        if (mu > tolerance)
+          orientation = FOOUTGOING;
+        else if (mu < -tolerance)
+          orientation = FOINCOMING;
+
+        cell_face_orientations_[cell.local_id][f] = orientation;
+
+        if (face.has_neighbor)
+        {
+          const auto& adj_cell = grid_->cells[face.neighbor_id];
+          const auto adj_face_idx = face.GetNeighborAdjacentFaceIndex(grid_.get());
+          auto& adj_face_ori = cell_face_orientations_[adj_cell.local_id][adj_face_idx];
+
+          switch (orientation)
+          {
+            case FOPARALLEL:
+              adj_face_ori = FOPARALLEL;
+              break;
+            case FOINCOMING:
+              adj_face_ori = FOOUTGOING;
+              break;
+            case FOOUTGOING:
+              adj_face_ori = FOINCOMING;
+              break;
+          }
+        }
+      }
+
+      ++f;
+    } // for face
+  }
+
+  // Make directed connections
+  for (auto& cell : grid_->local_cells)
+  {
+    const uint64_t c = cell.local_id;
+    size_t f = 0;
+    for (auto& face : cell.faces)
+    {
+      const double mu = omega(face.centroid).Dot(face.normal);
+      // If outgoing determine if it is to a local cell
+      if (cell_face_orientations_[cell.local_id][f] == FOOUTGOING)
+      {
+        // If it is a cell and not bndry
+        if (face.has_neighbor)
+        {
+          const auto weight = 0.;
+          cell_successors[c].insert(std::make_pair(face.GetNeighborLocalID(grid_.get()), weight));
+        }
+      }
+
+      ++f;
+    } // for face
+  } // for cell
+}
+
+
 void 
 UncollidedProblem::InitializeNearSourceRegions(const InputParameters& params)
 {
   const auto& near_source_param = params.GetParam("near_source");
   near_source_param.RequireBlockTypeIs(ParameterBlockType::ARRAY);
+
   for (const auto& log_vol : near_source_param)
     near_source_logvols_.push_back(log_vol.GetValue<std::shared_ptr<LogicalVolume>>());
+}
+
+
+void 
+UncollidedProblem::RaytraceNearSourceRegion() 
+{
+  // Loop over near-source region cells
+  for (const auto& cell : grid_->local_cells) {
+    
+  }
+}
+
+
+void 
+UncollidedProblem::RaytraceLine()
+{
+
+}
+
+
+void 
+UncollidedProblem::SweepBulkRegion()
+{
+
 }
 
 } // namespace opensn
