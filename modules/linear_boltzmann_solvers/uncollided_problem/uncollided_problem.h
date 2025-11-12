@@ -4,9 +4,12 @@
 #pragma once
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/sweep.h"
-#include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
+#include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/mesh/logical_volume/logical_volume.h"
+#include "framework/mesh/raytrace/raytracer.h"
+#include "framework/mesh/cell/cell.h"
+#include "framework/data_types/vector3.h"
 
 namespace opensn
 {
@@ -18,13 +21,17 @@ public:
 
   ~UncollidedProblem() override;
 
-  void Initialize() override;
-
   void ZeroSolutions() override {}
 
 protected:
   explicit UncollidedProblem(const std::string& name,
                              std::shared_ptr<MeshContinuum> grid_ptr);
+
+  void PrintSimHeader() override;
+
+  void InitializeSpatialDiscretization() override;
+
+  //void ComputeUnitIntegrals() override;
 
   /**
    * Populates cell relationships and face orientations for point source calculation.
@@ -37,11 +44,18 @@ protected:
 
   void InitializeNearSourceRegions(const InputParameters& params);
 
-  void RaytraceNearSourceRegion();
+  void RaytraceNearSourceRegion(const Vector3& point_source,
+                                const std::vector<double>& strength);
 
-  void RaytraceLine();
+  double RaytraceLine(const RayTracer& ray_tracer,
+                      const Cell& cell,
+                      const Vector3& qp_xyz,
+                      const Vector3& point_source,
+                      const std::vector<double>& strength);
 
   void SweepBulkRegion();
+
+  void Execute();
 
   /// Near source region logical volumes.
   std::vector<std::shared_ptr<LogicalVolume>> near_source_logvols_;
