@@ -18,8 +18,8 @@ namespace opensn
 
 struct UncollidedMatrices
 {
-  DenseMatrix<double> intV_shapeI_omega_gradshapeJ;
-  std::vector<DenseMatrix<double>> intS_omega_shapeI_shapeJ;
+  DenseMatrix<double> intV_shapeJ_omega_gradshapeI;
+  std::vector<DenseMatrix<double>> intS_omega_n_shapeI_shapeJ;
 };
 
 
@@ -62,18 +62,17 @@ protected:
   void RaytraceNearSourceRegion(const Vector3& point_source,
                                 const std::vector<double>& strength);
 
-  double RaytraceLine(const RayTracer& ray_tracer,
-                      const Cell& cell,
-                      const Vector3& qp_xyz,
-                      const Vector3& point_source,
-                      const std::vector<double>& strength);
+  std::vector<double> RaytraceLine(RayTracer& ray_tracer,
+                                   const Cell& cell,
+                                   const Vector3& qp_xyz,
+                                   const Vector3& point_source,
+                                   const std::vector<double>& strength,
+                                   const double tolerance = 1e-12);
 
   void SweepBulkRegion();
 
   UncollidedMatrices ComputeUncollidedIntegrals(const Cell& cell,
                                                 const Vector3& point_source);
-
-  DenseMatrix<double> ComputeMassMatrix(const Cell& cell);
 
   void Execute();
 
@@ -87,6 +86,13 @@ protected:
   std::vector<int> near_spls_;
   /// Bulk region uncollided sweep-plane local subgrid.
   std::vector<int> bulk_spls_;
+
+  DenseMatrix<Vector3> G_;
+  DenseMatrix<double> M_;
+  std::vector<DenseMatrix<double>> M_surf_;
+  std::vector<Vector<double>> Phi_;
+
+  std::vector<double> destination_phi_;
 
 public:
   static InputParameters GetInputParameters();

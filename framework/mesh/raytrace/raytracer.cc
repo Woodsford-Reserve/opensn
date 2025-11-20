@@ -614,7 +614,7 @@ CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
       intersection_point = vertex;
       distance_to_intersection = (vertex - line_point0).Norm();
 
-      Vector3 nudged_point = vertex + nudge*(vertex - line_point0).Normalized();
+      Vector3 nudged_point = vertex + nudge*(line_point1 - vertex).Normalized();
       for (const auto& cell : grid->local_cells)
       {
         if (grid->CheckPointInsideCell(cell, nudged_point))

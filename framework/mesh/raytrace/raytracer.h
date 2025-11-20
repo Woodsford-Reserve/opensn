@@ -30,7 +30,7 @@ class RayTracer
 private:
   const std::shared_ptr<MeshContinuum> reference_grid_;
   std::vector<double> cell_sizes_;
-  double epsilon_nudge_ = 1.0e-12;
+  double epsilon_nudge_ = 1.0e-10;
   double backward_tolerance_ = 1.0e-10;
   double extension_distance_ = 1.0e5;
   bool perform_concavity_checks_ = true;

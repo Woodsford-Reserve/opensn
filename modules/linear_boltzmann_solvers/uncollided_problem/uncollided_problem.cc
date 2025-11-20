@@ -16,6 +16,7 @@
 #include "caliper/cali.h"
 #include <boost/graph/topological_sort.hpp>
 #include <iomanip>
+#include <utility>
 
 namespace opensn
 {
@@ -197,6 +198,9 @@ UncollidedProblem::Execute()
 
   size_t num_loc_cells = grid_->local_cells.size();
 
+  size_t num_loc_nodes = discretization_->GetNumLocalNodes();
+  size_t num_loc_unknowns = num_loc_cells * num_groups_;
+
   // Loop over point sources
   for (int i = 0; i < GetPointSources().size(); ++i) {
     const auto pt = GetPointSources()[i];
@@ -206,6 +210,9 @@ UncollidedProblem::Execute()
     if (!near_source_logvols_[i]->Inside(pt_loc))
       throw std::runtime_error("One or more point sources is outside "
                                "its near-source region.");
+
+    // Initialize uncollided flux
+    destination_phi_.assign(num_loc_unknowns, 0.);
 
     // Populate uncollided cell relationships
     std::vector<std::set<std::pair<int, double>>> cell_successors(num_loc_cells);
@@ -272,45 +279,58 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
     const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
 
+    // Mass matrix times least-squares flux vector
+    Phi_.assign(num_groups_, Vector<double>(cell_num_nodes, 0.));
+    for (unsigned int i = 0; i < cell_num_nodes; ++i)
+    {
+      for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
+      {
+        // Raytrace to point
+        Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
+        std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, point_source, strength);
 
-    Vector3 centroid = cell.centroid;
-    Vector3 omega = ComputeOmega(centroid, point_source);
+        // Integrand value at quadrature point
+        double integrand = (*swf)(fe_vol_data.QPointXYZ(qp))
+                         * fe_vol_data.ShapeValue(i, qp)
+                         * fe_vol_data.JxW(qp);
 
-    RayTracerOutputInformation oi;
-    oi = ray_tracer.TraceRay(cell, centroid, omega);
-
-    std::cout << c << ":   " 
-              << oi.destination_face_neighbor << ",   "
-              << oi.pos_f.PrintStr()          << ",   "
-              << oi.distance_to_surface       << std::endl;
+        // Compute group-wise least squares fluxes
+        for (size_t g = 0; g < num_groups_; ++g) Phi_[g](i) += phi_qp[g] * integrand;
+      }
+    }
 
 
-    // // Mass matrix times least-squares flux vector
-    // Vector<double> MPhi(cell_num_nodes, 0.);
-    // for (unsigned int i = 0; i < cell_num_nodes; ++i)
-    // {
-    //   for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
-    //   {
-    //     // Raytrace to point
-    //     Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
-    //     double phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, point_source, strength);
+    // Enforce conservation
 
-    //     // Compute least squares flux
-    //     MPhi(i) += (*swf)(fe_vol_data.QPointXYZ(qp))
-    //              * fe_vol_data.ShapeValue(i, qp)
-    //              * phi_qp * fe_vol_data.JxW(qp);
-    //   }
-    // }
+
+    std::cout << c << ":   ";
+
+    // Invert mass matrix
+    M_ = unit_cell_matrices_[c].intV_shapeI_shapeJ;
+    for (size_t g = 0; g < num_groups_; ++g) 
+      GaussElimination(M_, Phi_[g], static_cast<int>(cell_num_nodes));
+
+    // Update flux 
+    const auto& transport_view = cell_transport_views_[c];
+    for (size_t i = 0; i < cell_num_nodes; ++i) 
+    {
+      const auto ir = transport_view.MapDOF(i, 0, 0);
+      for (size_t g = 0; g < num_groups_; ++g) destination_phi_[ir + g] = Phi_[g](i);
+
+      std::cout << destination_phi_[ir] << "   ";
+    }
+    std::cout << std::endl;
   }
 }
 
 
-double
-UncollidedProblem::RaytraceLine(const RayTracer& ray_tracer,
+std::vector<double>
+UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
                                 const Cell& cell,
                                 const Vector3& qp_xyz,
                                 const Vector3& point_source,
-                                const std::vector<double>& strength)
+                                const std::vector<double>& strength,
+                                const double tolerance)
 {
   // Uncollided flux analytical value
   auto phi_ex = [this](double q0, double d, double mfp) {
@@ -319,15 +339,64 @@ UncollidedProblem::RaytraceLine(const RayTracer& ray_tracer,
     return q0 / (4.*M_PI * d*d) * std::exp(-mfp);
   };
 
+  // Uncollided flux values at quadrature point
+  std::vector<double> phi (num_groups_, 0.);
+
   // Direction vector
   Vector3 omega = ComputeOmega(qp_xyz, point_source);
   if (omega.Norm() == 0.) 
     throw std::runtime_error("Point source lies at cell quadrature point.");
                 
-  
-  
+  // Starting cell ID and point
+  size_t cell_id = cell.local_id;
+  Vector3 line_point = qp_xyz;
 
-  return 0.;
+  // Distance to point source
+  double total_length = (point_source - qp_xyz).Norm();
+  double remaining_distance = total_length;
+
+  // Trace cells along path
+  std::vector<std::pair<size_t, double>> segment_lengths;
+  while (remaining_distance > tolerance)
+  {
+    // Trace cell
+    RayTracerOutputInformation oi;
+    oi = ray_tracer.TraceRay(grid_->local_cells[cell_id], line_point, omega);
+
+    // Distance through cell
+    double distance_in_cell = oi.distance_to_surface < remaining_distance
+                            ? oi.distance_to_surface
+                            : remaining_distance;
+
+    segment_lengths.push_back(std::pair<size_t, double>(cell_id, distance_in_cell));
+    remaining_distance -= distance_in_cell;
+
+    // Trace next cell
+    cell_id = oi.destination_face_neighbor;
+    line_point = oi.pos_f;
+  }
+
+  // Compute group-wise uncollided flux values
+  for (size_t g = 0; g < num_groups_; ++g) 
+  {
+    double mfp = 0.;
+
+    for (const auto& segment : segment_lengths) 
+    {
+      size_t cell_id = segment.first;
+      double length = segment.second;
+
+      const auto& transport_view = cell_transport_views_[cell_id];
+      const auto& xs = transport_view.GetXS();
+
+      double total_xs = xs.GetSigmaTotal()[g];
+      mfp += total_xs * length;
+    }
+
+    phi[g] = phi_ex(strength[g], total_length, mfp);
+  }
+
+  return phi;
 }
 
 
@@ -372,8 +441,8 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
   const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
   // Matrices
-  DenseMatrix<Vector3> IntV_shapeI_omega_gradshapeJ(cell_num_nodes, cell_num_nodes);
-  std::vector<DenseMatrix<double>> IntS_omega_shapeI_shapeJ(cell_num_faces);
+  DenseMatrix<double> intV_shapeJ_omega_gradshapeI(cell_num_nodes, cell_num_nodes);
+  std::vector<DenseMatrix<double>> IntS_omega_n_shapeI_shapeJ(cell_num_faces);
 
   // Volume integrals
   for (unsigned int i = 0; i < cell_num_nodes; ++i)
@@ -388,13 +457,6 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
       }
     }
   }
-}
-
-
-DenseMatrix<double> 
-UncollidedProblem::ComputeMassMatrix(const Cell& cell)
-{
-
 }
 
 } // namespace opensn
