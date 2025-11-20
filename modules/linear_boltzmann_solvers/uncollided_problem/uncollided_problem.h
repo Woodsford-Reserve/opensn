@@ -9,10 +9,19 @@
 #include "framework/mesh/logical_volume/logical_volume.h"
 #include "framework/mesh/raytrace/raytracer.h"
 #include "framework/mesh/cell/cell.h"
+#include "framework/data_types/dense_matrix.h"
+#include "framework/data_types/vector.h"
 #include "framework/data_types/vector3.h"
 
 namespace opensn
 {
+
+struct UncollidedMatrices
+{
+  DenseMatrix<double> intV_shapeI_omega_gradshapeJ;
+  std::vector<DenseMatrix<double>> intS_omega_shapeI_shapeJ;
+};
+
 
 class UncollidedProblem : public LBSProblem
 {
@@ -31,7 +40,13 @@ protected:
 
   void InitializeSpatialDiscretization() override;
 
-  //void ComputeUnitIntegrals() override;
+  static Vector3 ComputeOmega(const Vector3& point_source,
+                              const Vector3& qpoint)
+  {
+    double norm = (qpoint - point_source).Norm();
+    return norm == 0. ? Vector3(0., 0., 0.) 
+                      : (qpoint - point_source).Normalized();
+  }
 
   /**
    * Populates cell relationships and face orientations for point source calculation.
@@ -54,6 +69,9 @@ protected:
                       const std::vector<double>& strength);
 
   void SweepBulkRegion();
+
+  UncollidedMatrices ComputeUncollidedIntegrals(const Cell& cell,
+                                                const Vector3& point_source);
 
   void Execute();
 
