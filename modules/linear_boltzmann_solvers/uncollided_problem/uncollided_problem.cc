@@ -7,9 +7,6 @@
 #include "framework/math/spatial_discretization/cell_mappings/cell_mapping.h"
 #include "framework/math/spatial_weight_function.h"
 #include "framework/math/quadratures/quadrature_order.h"
-#include "framework/mesh/mesh_continuum/mesh_continuum.h"
-#include "framework/data_types/dense_matrix.h"
-#include "framework/data_types/vector.h"
 #include "framework/logging/log.h"
 #include "framework/logging/log_exceptions.h"
 #include "framework/utils/timer.h"
@@ -103,13 +100,6 @@ UncollidedProblem::PrintSimHeader()
 }
 
 
-// void 
-// UncollidedProblem::ComputeUnitIntegrals()
-// {
-
-// }
-
-
 void
 UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
                                              std::vector<std::set<std::pair<int, double>>>& cell_successors)
@@ -126,12 +116,6 @@ UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
   for (auto& cell : grid_->local_cells)
     cell_face_orientations_[cell.local_id].assign(cell.faces.size(), FOPARALLEL);
 
-  auto omega = [&point_source](Vector3& centroid) {
-    double norm = (centroid - point_source).Norm();
-    return norm == 0. ? Vector3(0., 0., 0.) 
-                      : (centroid - point_source).Normalized();
-  };
-
   for (auto& cell : grid_->local_cells)
   {
     size_t f = 0;
@@ -139,7 +123,8 @@ UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
     {
       // Determine if the face is incident
       FaceOrientation orientation = FOPARALLEL;
-      const double mu = omega(face.centroid).Dot(face.normal);
+      Vector3 omega = ComputeOmega(point_source, face.centroid);
+      const double mu = omega.Dot(face.normal);
 
       bool owns_face = true;
       if (face.has_neighbor and cell.global_id > face.neighbor_id)
@@ -186,7 +171,8 @@ UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
     size_t f = 0;
     for (auto& face : cell.faces)
     {
-      const double mu = omega(face.centroid).Dot(face.normal);
+      Vector3 omega = ComputeOmega(point_source, face.centroid);
+      const double mu = omega.Dot(face.normal);
       // If outgoing determine if it is to a local cell
       if (cell_face_orientations_[cell.local_id][f] == FOOUTGOING)
       {
@@ -255,7 +241,7 @@ UncollidedProblem::Execute()
     
     // Calculate uncollided flux
     RaytraceNearSourceRegion(pt_loc, pt->GetStrength());
-    SweepBulkRegion();
+    // SweepBulkRegion();
   }
 }
 
@@ -265,8 +251,8 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
                                             const std::vector<double>& strength) 
 {
   CALI_CXX_MARK_SCOPE("UncollidedProblem::RaytraceNearSourceRegion");
-
   log.Log() << "\nRay tracing near-source region.\n";
+
   const auto& sdm = *discretization_;
 
 
@@ -315,22 +301,34 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
     const size_t cell_num_nodes = cell_mapping.GetNumNodes();
     const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
-    // Mass matrix times least-squares flux vector
-    Vector<double> MPhi(cell_num_nodes, 0.);
-    for (unsigned int i = 0; i < cell_num_nodes; ++i)
-    {
-      for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
-      {
-        // Raytrace to point
-        Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
-        double phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, point_source, strength);
 
-        // Compute least squares flux
-        MPhi(i) += (*swf)(fe_vol_data.QPointXYZ(qp))
-                 * fe_vol_data.ShapeValue(i, qp)
-                 * phi_qp * fe_vol_data.JxW(qp);
-      }
-    }
+
+    Vector3 centroid = cell.centroid;
+    Vector3 omega = ComputeOmega(centroid, point_source);
+
+    RayTracerOutputInformation oi;
+    oi = ray_tracer.TraceRay(cell, centroid, omega);
+
+    std::cout << c << ":   " 
+              << oi.destination_face_neighbor << std::endl;
+
+
+    // // Mass matrix times least-squares flux vector
+    // Vector<double> MPhi(cell_num_nodes, 0.);
+    // for (unsigned int i = 0; i < cell_num_nodes; ++i)
+    // {
+    //   for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
+    //   {
+    //     // Raytrace to point
+    //     Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
+    //     double phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, point_source, strength);
+
+    //     // Compute least squares flux
+    //     MPhi(i) += (*swf)(fe_vol_data.QPointXYZ(qp))
+    //              * fe_vol_data.ShapeValue(i, qp)
+    //              * phi_qp * fe_vol_data.JxW(qp);
+    //   }
+    // }
   }
 }
 
@@ -345,8 +343,8 @@ UncollidedProblem::RaytraceLine(const RayTracer& ray_tracer,
   // Uncollided flux analytical value
   auto phi_ex = [this](double q0, double d, double mfp) {
     if (grid_->GetDimension() == 2)
-      return q0/(2.*M_PI * d)*std::exp(-mfp);
-    return q0/(4.*M_PI * d*d)*std::exp(-mfp);
+      return q0 / (2.*M_PI * d) * std::exp(-mfp);
+    return q0 / (4.*M_PI * d*d) * std::exp(-mfp);
   };
 
   // Direction vector
@@ -367,13 +365,58 @@ UncollidedProblem::RaytraceLine(const RayTracer& ray_tracer,
 void 
 UncollidedProblem::SweepBulkRegion()
 {
-  CALI_CXX_MARK_SCOPE("LBSProblem::ComputeUnitIntegrals");
-
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::SweepBulkRegion");
   log.Log() << "Sweeping bulk region.\n";
+
+  const auto& sdm = *discretization_;
 
   // Loop over bulk region cells
   for (int c : bulk_spls_) {
     const Cell& cell = grid_->local_cells[c];
+
+    // Cell mapping
+    auto coord_sys = grid_->GetCoordinateSystem();
+    auto swf = SpatialWeightFunction::FromCoordinateType(coord_sys);
+    const auto& cell_mapping = sdm.GetCellMapping(cell);
+    const size_t cell_num_faces = cell.faces.size();
+    const size_t cell_num_nodes = cell_mapping.GetNumNodes();
+    const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
+
+
+  }
+}
+
+
+UncollidedMatrices 
+UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
+                                              const Vector3& point_source)
+{
+  const auto& sdm = *discretization_;
+
+  // Cell mapping
+  auto coord_sys = grid_->GetCoordinateSystem();
+  auto swf = SpatialWeightFunction::FromCoordinateType(coord_sys);
+  const auto& cell_mapping = sdm.GetCellMapping(cell);
+  const size_t cell_num_faces = cell.faces.size();
+  const size_t cell_num_nodes = cell_mapping.GetNumNodes();
+  const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
+
+  // Matrices
+  DenseMatrix<Vector3> IntV_shapeI_omega_gradshapeJ(cell_num_nodes, cell_num_nodes);
+  std::vector<DenseMatrix<double>> IntS_omega_shapeI_shapeJ(cell_num_faces);
+
+  // Volume integrals
+  for (unsigned int i = 0; i < cell_num_nodes; ++i)
+  {
+    for (unsigned int j = 0; j < cell_num_nodes; ++j)
+    {
+      for (const auto& qp : fe_vol_data.GetQuadraturePointIndices())
+      {
+        // IntV_shapeI_omega_gradshapeJ(i, j) +=
+        //   (*swf)(fe_vol_data.QPointXYZ(qp)) * fe_vol_data.ShapeValue(i, qp) *
+
+      }
+    }
   }
 }
 
