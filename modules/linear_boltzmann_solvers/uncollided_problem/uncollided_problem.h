@@ -40,12 +40,12 @@ protected:
 
   void InitializeSpatialDiscretization() override;
 
-  static Vector3 ComputeOmega(const Vector3& point_source,
-                              const Vector3& qpoint)
+  static Vector3 ComputeOmega(const Vector3& point0,
+                              const Vector3& point1)
   {
-    double norm = (qpoint - point_source).Norm();
+    double norm = (point1 - point0).Norm();
     return norm == 0. ? Vector3(0., 0., 0.) 
-                      : (qpoint - point_source).Normalized();
+                      : (point1 - point0).Normalized();
   }
 
   /**
@@ -72,6 +72,8 @@ protected:
 
   UncollidedMatrices ComputeUncollidedIntegrals(const Cell& cell,
                                                 const Vector3& point_source);
+
+  DenseMatrix<double> ComputeMassMatrix(const Cell& cell);
 
   void Execute();
 

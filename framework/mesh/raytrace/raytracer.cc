@@ -313,9 +313,19 @@ RayTracer::TracePolygon(const Cell& cell,
   }
   else
   {
-    RayTracerOutputInformation blank_oi;
-    blank_oi.distance_to_surface = 1.0e15;
-    oi = blank_oi;
+    bool intersect_at_vertex = CheckIntersectionAtVertex(grid, cell.vertex_ids, 
+                                                         pos_i, pos_f_line, 
+                                                         backward_tolerance_, 
+                                                         epsilon_nudge_, oi.pos_f, 
+                                                         oi.distance_to_surface,
+                                                         oi.destination_face_neighbor);
+
+    if (not intersect_at_vertex)
+    {
+      RayTracerOutputInformation blank_oi;
+      blank_oi.distance_to_surface = 1.0e15;
+      oi = blank_oi;
+    }
   }
 }
 
@@ -572,6 +582,50 @@ CheckPlaneTetIntersect(const Vector3& plane_normal,
       current_sense = new_sense;
     else if (new_sense != current_sense)
       return true;
+  }
+  return false;
+}
+
+bool 
+CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
+                          const std::vector<size_t>& vertex_ids,
+                          const Vector3& line_point0,
+                          const Vector3& line_point1,
+                          const double tolerance,
+                          const double nudge,
+                          Vector3& intersection_point,
+                          double& distance_to_intersection,
+                          size_t& neighbor_id)
+{
+  for (size_t vertex_id : vertex_ids)
+  {
+    const Vector3& vertex = grid->vertices[vertex_id];
+
+    double point0_to_vertex = (vertex      - line_point0).Norm();
+    double point1_to_vertex = (vertex      - line_point1).Norm();
+    double point0_to_point1 = (line_point1 - line_point0).Norm();
+
+    double diff = std::abs( point0_to_point1
+                        - ( point0_to_vertex 
+                          + point1_to_vertex ) );
+
+    if (diff < tolerance) 
+    {
+      intersection_point = vertex;
+      distance_to_intersection = (vertex - line_point0).Norm();
+
+      Vector3 nudged_point = vertex + nudge*(vertex - line_point0).Normalized();
+      for (const auto& cell : grid->local_cells)
+      {
+        if (grid->CheckPointInsideCell(cell, nudged_point))
+        {
+          neighbor_id = cell.local_id;
+          break;
+        }
+      }
+
+      return true;
+    }
   }
   return false;
 }

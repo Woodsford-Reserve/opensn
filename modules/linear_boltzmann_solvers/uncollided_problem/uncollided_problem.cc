@@ -255,38 +255,8 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
 
   const auto& sdm = *discretization_;
 
-
-  // Compute approximate cell sizes
-  auto GetCellApproximateSize = [this](const Cell& cell)
-  {
-    const auto& v0 = grid_->vertices[cell.vertex_ids[0]];
-    double xmin = v0.x, xmax = v0.x;
-    double ymin = v0.y, ymax = v0.y;
-    double zmin = v0.z, zmax = v0.z;
-
-    for (uint64_t vid : cell.vertex_ids)
-    {
-      const auto& v = grid_->vertices[vid];
-
-      xmin = std::min(xmin, v.x);
-      xmax = std::max(xmax, v.x);
-      ymin = std::min(ymin, v.y);
-      ymax = std::max(ymax, v.y);
-      zmin = std::min(zmin, v.z);
-      zmax = std::max(zmax, v.z);
-    }
-
-    return (Vector3(xmin, ymin, zmin) - Vector3(xmax, ymax, zmax)).Norm();
-  };
-
   // Create raytracer
-  std::vector<double> cell_sizes(grid_->local_cells.size(), 0.0);
-  for (int c : near_spls_) {
-    const Cell& cell = grid_->local_cells[c];
-    cell_sizes[cell.local_id] = GetCellApproximateSize(cell);
-  }
-  RayTracer ray_tracer(grid_, cell_sizes);
-
+  RayTracer ray_tracer(grid_);
 
   // Loop over near-source region cells
   for (int c : near_spls_) 
@@ -310,7 +280,9 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
     oi = ray_tracer.TraceRay(cell, centroid, omega);
 
     std::cout << c << ":   " 
-              << oi.destination_face_neighbor << std::endl;
+              << oi.destination_face_neighbor << ",   "
+              << oi.pos_f.PrintStr()          << ",   "
+              << oi.distance_to_surface       << std::endl;
 
 
     // // Mass matrix times least-squares flux vector
@@ -348,14 +320,11 @@ UncollidedProblem::RaytraceLine(const RayTracer& ray_tracer,
   };
 
   // Direction vector
-  double norm = (qp_xyz - point_source).Norm();
-  if (norm == 0.) 
-    throw std::runtime_error("Point source lies at cell quadrature point."); 
-  Vector3 omega = (qp_xyz - point_source).Normalized();
+  Vector3 omega = ComputeOmega(qp_xyz, point_source);
+  if (omega.Norm() == 0.) 
+    throw std::runtime_error("Point source lies at cell quadrature point.");
                 
-  // Compute segment lengths
-  std::vector<double> segment_lengths;
-  PopulateRaySegmentLengths(grid_, cell, point_source, qp_xyz, omega, segment_lengths);
+  
   
 
   return 0.;
@@ -371,7 +340,8 @@ UncollidedProblem::SweepBulkRegion()
   const auto& sdm = *discretization_;
 
   // Loop over bulk region cells
-  for (int c : bulk_spls_) {
+  for (int c : bulk_spls_) 
+  {
     const Cell& cell = grid_->local_cells[c];
 
     // Cell mapping
@@ -418,6 +388,13 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
       }
     }
   }
+}
+
+
+DenseMatrix<double> 
+UncollidedProblem::ComputeMassMatrix(const Cell& cell)
+{
+
 }
 
 } // namespace opensn

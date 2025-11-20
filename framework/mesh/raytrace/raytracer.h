@@ -30,14 +30,14 @@ class RayTracer
 private:
   const std::shared_ptr<MeshContinuum> reference_grid_;
   std::vector<double> cell_sizes_;
-  double epsilon_nudge_ = 1.0e-8;
+  double epsilon_nudge_ = 1.0e-12;
   double backward_tolerance_ = 1.0e-10;
   double extension_distance_ = 1.0e5;
   bool perform_concavity_checks_ = true;
 
 public:
   explicit RayTracer(const std::shared_ptr<MeshContinuum> grid,
-                     std::vector<double> cell_sizes,
+                     std::vector<double> cell_sizes = {},
                      bool perform_concavity_checks = true)
     : reference_grid_(grid),
       cell_sizes_(std::move(cell_sizes)),
@@ -167,6 +167,16 @@ bool CheckPointInTriangle(
 bool CheckPlaneTetIntersect(const Vector3& plane_normal,
                             const Vector3& plane_point,
                             const std::vector<Vector3>& tet_points);
+
+bool CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
+                               const std::vector<size_t>& vertex_ids,
+                               const Vector3& line_point0,
+                               const Vector3& line_point1,
+                               const double tolerance,
+                               const double nudge,
+                               Vector3& intersection_point,
+                               double& distance_to_intersection,
+                               size_t& neighbor_id);
 
 /// Populates segment lengths along a ray. Sorted along the direction.
 void PopulateRaySegmentLengths(std::shared_ptr<MeshContinuum> grid,
