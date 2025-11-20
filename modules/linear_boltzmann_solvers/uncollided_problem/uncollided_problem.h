@@ -55,37 +55,38 @@ protected:
    * \param cell_successors Cell successors.
    */
   void PopulateCellRelationships(const Vector3& point_source,
-                                 std::vector<std::set<std::pair<int, double>>>& cell_successors);
+                                 std::vector<std::set<std::pair<size_t, double>>>& cell_successors);
 
   void InitializeNearSourceRegions(const InputParameters& params);
 
-  void RaytraceNearSourceRegion(const Vector3& point_source,
-                                const std::vector<double>& strength);
+  void RaytraceNearSourceRegion(const PointSource* point_source);
 
   std::vector<double> RaytraceLine(RayTracer& ray_tracer,
                                    const Cell& cell,
                                    const Vector3& qp_xyz,
-                                   const Vector3& point_source,
+                                   const Vector3& pt_loc,
                                    const std::vector<double>& strength,
                                    const double tolerance = 1e-12);
 
   void SweepBulkRegion();
 
   UncollidedMatrices ComputeUncollidedIntegrals(const Cell& cell,
-                                                const Vector3& point_source);
+                                                const Vector3& pt_loc);
 
   void Execute();
+
+  double ComputeBalance();
 
   /// Near source region logical volumes.
   std::vector<std::shared_ptr<LogicalVolume>> near_source_logvols_;
   /// Cell face orientations for the cells in the local cell graph.
   std::vector<std::vector<FaceOrientation>> cell_face_orientations_;
   /// Uncollided sweep-plane local subgrid.
-  std::vector<int> spls_;
+  std::vector<size_t> spls_;
   /// Near source uncollided sweep-plane local subgrid.
-  std::vector<int> near_spls_;
+  std::vector<size_t> near_spls_;
   /// Bulk region uncollided sweep-plane local subgrid.
-  std::vector<int> bulk_spls_;
+  std::vector<size_t> bulk_spls_;
 
   DenseMatrix<Vector3> G_;
   DenseMatrix<double> M_;
