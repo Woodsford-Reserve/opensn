@@ -17,6 +17,7 @@
 #include <boost/graph/topological_sort.hpp>
 #include <iomanip>
 #include <utility>
+#include <unordered_map>
 
 namespace opensn
 {
@@ -103,7 +104,7 @@ UncollidedProblem::PrintSimHeader()
 
 void
 UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
-                                             std::vector<std::set<std::pair<int, double>>>& cell_successors)
+                                             std::vector<std::set<std::pair<size_t, double>>>& cell_successors)
 {
   CALI_CXX_MARK_SCOPE("UncollidedProblem::PopulateCellRelationships");
 
@@ -202,7 +203,7 @@ UncollidedProblem::Execute()
   size_t num_loc_unknowns = num_loc_cells * num_groups_;
 
   // Loop over point sources
-  for (int i = 0; i < GetPointSources().size(); ++i) {
+  for (size_t i = 0; i < GetPointSources().size(); ++i) {
     const auto pt = GetPointSources()[i];
 
     // Ensure point source is inside near-source region
@@ -215,7 +216,7 @@ UncollidedProblem::Execute()
     destination_phi_.assign(num_loc_unknowns, 0.);
 
     // Populate uncollided cell relationships
-    std::vector<std::set<std::pair<int, double>>> cell_successors(num_loc_cells);
+    std::vector<std::set<std::pair<size_t, double>>> cell_successors(num_loc_cells);
     PopulateCellRelationships(pt_loc, cell_successors);
 
     // Create local cell graph
@@ -231,14 +232,14 @@ UncollidedProblem::Execute()
     std::reverse(spls_.begin(), spls_.end());
     if (spls_.empty())
     {
-      throw std::logic_error("UncollidedProblem: Cyclic dependencies found in the local cell graph.\n"
-                             "Cycles need to be allowed by the calling application.");
+      throw std::logic_error("UncollidedProblem: Cyclic dependencies found "
+                             "in the local cell graph.");
     }
 
     // Separate SPLS into near-source and bulk region
     near_spls_.clear(); bulk_spls_.clear();
 
-    for (int c : spls_) {
+    for (size_t c : spls_) {
       const auto& cell = grid_->local_cells[c];
       if (near_source_logvols_[i]->Inside(cell.centroid)) 
         near_spls_.push_back(c);
@@ -247,26 +248,34 @@ UncollidedProblem::Execute()
     }
     
     // Calculate uncollided flux
-    RaytraceNearSourceRegion(pt_loc, pt->GetStrength());
+    RaytraceNearSourceRegion(pt.get());
     // SweepBulkRegion();
   }
 }
 
 
 void 
-UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
-                                            const std::vector<double>& strength) 
+UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source) 
 {
   CALI_CXX_MARK_SCOPE("UncollidedProblem::RaytraceNearSourceRegion");
   log.Log() << "\nRay tracing near-source region.\n";
 
   const auto& sdm = *discretization_;
 
+  // Point source data
+  const Vector3& pt_loc = point_source->GetLocation();
+  const std::vector<double>& strength = point_source->GetStrength(); 
+
   // Create raytracer
   RayTracer ray_tracer(grid_);
 
+  // Face leakages
+  std::unordered_map<size_t, std::vector<std::vector<double>>> leakages;
+  std::vector<std::vector<double>> cell_leakage;
+  std::vector<double> face_leakage;
+
   // Loop over near-source region cells
-  for (int c : near_spls_) 
+  for (size_t c : near_spls_) 
   {
     const Cell& cell = grid_->local_cells[c];
 
@@ -279,6 +288,61 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
     const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
 
+    // Face orientations
+    constexpr auto FOPARALLEL = FaceOrientation::PARALLEL;
+    constexpr auto FOINCOMING = FaceOrientation::INCOMING;
+    constexpr auto FOOUTGOING = FaceOrientation::OUTGOING;
+
+    // Compute leakages
+    cell_leakage.resize(cell_num_faces);
+    for (size_t f = 0; f < cell_num_faces; ++f) 
+    {
+      const auto orientation = cell_face_orientations_[c][f];
+      face_leakage.assign(num_groups_, 0.);
+
+      // Compute leakage out of outgoing face
+      if (orientation == FOOUTGOING)
+      {
+        // Face data
+        const Vector3& normal = cell.faces[f].normal;
+        const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
+
+        double leakage = 0.;
+        for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+        {
+          // Raytrace to point
+          Vector3 qp_xyz = fe_srf_data.QPointXYZ(qp);
+          Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
+
+          std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, 
+                                                    pt_loc, strength);
+
+          // Compute leakage
+          double integrand = (*swf)(fe_srf_data.QPointXYZ(qp))
+                           * omega.Dot(normal) 
+                           * fe_srf_data.JxW(qp);
+          
+          for (size_t g = 0; g < num_groups_; ++g)
+            face_leakage[g] += phi_qp[g] * integrand;
+        }
+      }
+
+      // Retrieve leakage in from incoming face
+      else if (orientation == FOINCOMING)
+      {
+        size_t neigh_id = cell.faces[f].neighbor_id;
+        size_t neigh_face_ind = cell.faces[f].GetNeighborAdjacentFaceIndex(grid_.get());
+        face_leakage = leakages[neigh_id][neigh_face_ind];
+      }
+
+      // Save leakage through face
+      cell_leakage[f] = face_leakage;
+    }
+
+    // Save leakage through cell faces
+    leakages.emplace(c, cell_leakage);
+
+
     // Mass matrix times least-squares flux vector
     Phi_.assign(num_groups_, Vector<double>(cell_num_nodes, 0.));
     for (unsigned int i = 0; i < cell_num_nodes; ++i)
@@ -287,39 +351,82 @@ UncollidedProblem::RaytraceNearSourceRegion(const Vector3& point_source,
       {
         // Raytrace to point
         Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
-        std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, point_source, strength);
+        std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, 
+                                                  point_source->GetLocation(), 
+                                                  point_source->GetStrength());
 
         // Integrand value at quadrature point
         double integrand = (*swf)(fe_vol_data.QPointXYZ(qp))
                          * fe_vol_data.ShapeValue(i, qp)
                          * fe_vol_data.JxW(qp);
 
-        // Compute group-wise least squares fluxes
-        for (size_t g = 0; g < num_groups_; ++g) Phi_[g](i) += phi_qp[g] * integrand;
+        // Compute group-wise least-squares fluxes
+        for (size_t g = 0; g < num_groups_; ++g) 
+          Phi_[g](i) += phi_qp[g] * integrand;
       }
     }
-
-
-    // Enforce conservation
-
-
-    std::cout << c << ":   ";
 
     // Invert mass matrix
     M_ = unit_cell_matrices_[c].intV_shapeI_shapeJ;
     for (size_t g = 0; g < num_groups_; ++g) 
       GaussElimination(M_, Phi_[g], static_cast<int>(cell_num_nodes));
 
-    // Update flux 
+    
+    // Transport view
     const auto& transport_view = cell_transport_views_[c];
+    const auto& xs = transport_view.GetXS();
+
+    // Enforce conservation
+    for (size_t g = 0; g < num_groups_; ++g)
+    {
+      double source = 0., sink = 0.;
+      double total_xs = xs.GetSigmaTotal()[g];
+
+      // Point source in cell
+      if (grid_->CheckPointInsideCell(cell, pt_loc))
+      {
+        for (const auto& subscriber : point_source->GetSubscribers())
+        {
+          if (subscriber.cell_local_id == c)
+            source += strength[g] * subscriber.volume_weight;
+        }
+      }
+
+      // Removal rate in cell
+      double phi_avg = 0.;
+      for (double phi_val : Phi_[g]) phi_avg += phi_val;
+      phi_avg /= cell_num_nodes;
+
+      sink += total_xs * phi_avg * cell.volume;
+
+      // Leakage through faces
+      for (size_t f = 0; f < cell_num_faces; ++f)
+      {
+        if (cell_face_orientations_[c][f] == FOINCOMING)
+          source += leakages[c][f][g];
+
+        else if (cell_face_orientations_[c][f] == FOOUTGOING)
+          sink += leakages[c][f][g];
+      }
+
+
+      // Scaling factor
+      double alpha = source / sink;
+
+      for (size_t i = 0; i < cell_num_nodes; ++i) 
+        Phi_[g](i) *= alpha;
+
+      for (size_t f = 0; f < cell_num_faces; ++f)
+        if (cell_face_orientations_[c][f] == FOOUTGOING)
+          leakages[c][f][g] *= alpha;
+    }
+
+    // Update flux
     for (size_t i = 0; i < cell_num_nodes; ++i) 
     {
       const auto ir = transport_view.MapDOF(i, 0, 0);
       for (size_t g = 0; g < num_groups_; ++g) destination_phi_[ir + g] = Phi_[g](i);
-
-      std::cout << destination_phi_[ir] << "   ";
     }
-    std::cout << std::endl;
   }
 }
 
@@ -328,7 +435,7 @@ std::vector<double>
 UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
                                 const Cell& cell,
                                 const Vector3& qp_xyz,
-                                const Vector3& point_source,
+                                const Vector3& pt_loc,
                                 const std::vector<double>& strength,
                                 const double tolerance)
 {
@@ -343,7 +450,7 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
   std::vector<double> phi (num_groups_, 0.);
 
   // Direction vector
-  Vector3 omega = ComputeOmega(qp_xyz, point_source);
+  Vector3 omega = ComputeOmega(qp_xyz, pt_loc);
   if (omega.Norm() == 0.) 
     throw std::runtime_error("Point source lies at cell quadrature point.");
                 
@@ -352,7 +459,7 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
   Vector3 line_point = qp_xyz;
 
   // Distance to point source
-  double total_length = (point_source - qp_xyz).Norm();
+  double total_length = (pt_loc - qp_xyz).Norm();
   double remaining_distance = total_length;
 
   // Trace cells along path
@@ -428,7 +535,7 @@ UncollidedProblem::SweepBulkRegion()
 
 UncollidedMatrices 
 UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
-                                              const Vector3& point_source)
+                                              const Vector3& pt_loc)
 {
   const auto& sdm = *discretization_;
 
