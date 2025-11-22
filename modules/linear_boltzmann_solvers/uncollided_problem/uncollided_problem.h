@@ -75,8 +75,6 @@ protected:
 
   void Execute();
 
-  double ComputeBalance();
-
   /// Near source region logical volumes.
   std::vector<std::shared_ptr<LogicalVolume>> near_source_logvols_;
   /// Cell face orientations for the cells in the local cell graph.
