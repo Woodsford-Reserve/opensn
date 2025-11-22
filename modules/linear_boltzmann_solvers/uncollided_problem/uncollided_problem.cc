@@ -247,7 +247,24 @@ UncollidedProblem::Execute()
     
     // Calculate uncollided flux
     RaytraceNearSourceRegion(pt);
-    SweepBulkRegion();
+    SweepBulkRegion(pt_loc);
+
+
+    const auto& sdm = *discretization_;
+
+    for (size_t c = 0; c < num_loc_cells; ++c)
+    {
+      const Cell& cell = grid_->local_cells[c];
+      size_t cell_num_nodes = cell.vertex_ids.size();
+
+      double phi_avg = 0.;
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+      {
+        const auto ir = sdm.MapDOFLocal(cell, i);
+        phi_avg += destination_phi_[ir] / cell_num_nodes;
+      }
+      std::cout << phi_avg << std::endl;
+    }
   }
 }
 
@@ -272,12 +289,15 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
   std::vector<std::vector<double>> cell_leakage;
   std::vector<double> face_leakage;
 
+  // Source and sink terms for conservation
+  std::vector<double> source, sink;
+
   // Face orientations
   constexpr auto FOPARALLEL = FaceOrientation::PARALLEL;
   constexpr auto FOINCOMING = FaceOrientation::INCOMING;
   constexpr auto FOOUTGOING = FaceOrientation::OUTGOING;
 
-  // Loop over near-source region cells
+  // Ray-trace near-source region cells
   for (size_t c : near_spls_) 
   {
     const Cell& cell = grid_->local_cells[c];
@@ -366,56 +386,62 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
     for (size_t g = 0; g < num_groups_; ++g) 
       GaussElimination(M_, Phi_[g], static_cast<int>(cell_num_nodes));
     
+
     // Transport view
     const auto& transport_view = cell_transport_views_[c];
     const auto& xs = transport_view.GetXS();
 
     // Enforce conservation
-    for (size_t g = 0; g < num_groups_; ++g)
-    {
-      double source = 0., sink = 0.;
-      double total_xs = densities_local_[c] * xs.GetSigmaTotal()[g];
+    std::vector<double> source(num_groups_, 0.);
+    std::vector<double> sink(num_groups_, 0.);
 
-      // Point source in cell
-      if (grid_->CheckPointInsideCell(cell, pt_loc))
+    // Point source rate in cell
+    if (grid_->CheckPointInsideCell(cell, pt_loc))
+    {
+      for (const auto& subscriber : point_source->GetSubscribers())
       {
-        for (const auto& subscriber : point_source->GetSubscribers())
+        if (subscriber.cell_local_id == c)
         {
-          if (subscriber.cell_local_id == c)
-            source += strength[g] * subscriber.volume_weight;
+          for (size_t g = 0; g < num_groups_; ++g)
+            source[g] += strength[g] * subscriber.volume_weight;
+          break;
         }
       }
+    }
 
-      // Removal rate in cell
+    // Removal rate in cell
+    for (size_t g = 0; g < num_groups_; ++g)
+    {
       double phi_avg = 0.;
       for (double phi_val : Phi_[g]) phi_avg += phi_val;
       phi_avg /= cell_num_nodes;
 
-      sink += total_xs * phi_avg * cell.volume;
-
-      // Leakage through faces
-      for (size_t f = 0; f < cell_num_faces; ++f)
-      {
-        if (cell_face_orientations_[c][f] == FOINCOMING)
-          source += leakages[c][f][g];
-
-        else if (cell_face_orientations_[c][f] == FOOUTGOING)
-          sink += leakages[c][f][g];
-      }
-
-
-      // Scaling factor
-      double alpha = source / sink;
-
-      for (size_t i = 0; i < cell_num_nodes; ++i) 
-        Phi_[g](i) *= alpha;
-
-      for (size_t f = 0; f < cell_num_faces; ++f)
-        if (cell_face_orientations_[c][f] == FOOUTGOING)
-          leakages[c][f][g] *= alpha;
+      double total_xs = densities_local_[c] * xs.GetSigmaTotal()[g];
+      sink[g] += total_xs * phi_avg * cell.volume;
     }
 
-    // Update flux
+    // Leakage through faces
+    for (size_t f = 0; f < cell_num_faces; ++f)
+    {
+      if (cell_face_orientations_[c][f] == FOINCOMING)
+        for(size_t g = 0; g < num_groups_; ++g) source[g] += leakages[c][f][g];
+        
+      else if (cell_face_orientations_[c][f] == FOOUTGOING)
+        for(size_t g = 0; g < num_groups_; ++g) sink[g] += leakages[c][f][g];
+    }
+
+    // Rescale solution
+    for (size_t g = 0; g < num_groups_; ++g)
+    {
+      double alpha = source[g] / sink[g];
+
+      for (size_t i = 0; i < cell_num_nodes; ++i) Phi_[g](i) *= alpha;
+
+      for (size_t f = 0; f < cell_num_faces; ++f)
+        if (cell_face_orientations_[c][f] == FOOUTGOING) leakages[c][f][g] *= alpha;
+    }
+
+    // Update flux solution
     for (size_t i = 0; i < cell_num_nodes; ++i) 
     {
       const auto ir = sdm.MapDOFLocal(cell, i);
@@ -478,51 +504,149 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
   }
 
   // Compute group-wise uncollided flux values
-  for (size_t g = 0; g < num_groups_; ++g) 
+  std::vector<double> mfp(num_groups_, 0.);
+  for (const auto& segment : segment_lengths) 
   {
-    double mfp = 0.;
+    size_t cell_id = segment.first;
+    double length = segment.second;
 
-    for (const auto& segment : segment_lengths) 
+    const auto& transport_view = cell_transport_views_[cell_id];
+    const auto& xs = transport_view.GetXS();
+
+    for (size_t g = 0; g < num_groups_; ++g) 
     {
-      size_t cell_id = segment.first;
-      double length = segment.second;
-
-      const auto& transport_view = cell_transport_views_[cell_id];
-      const auto& xs = transport_view.GetXS();
-
       double total_xs = densities_local_[cell.local_id] * xs.GetSigmaTotal()[g];
-      mfp += total_xs * length;
+      mfp[g] += total_xs * length;
     }
-
-    phi[g] = phi_ex(strength[g], total_length, mfp);
   }
+
+  for(size_t g = 0; g < num_groups_; ++g) 
+    phi[g] = phi_ex(strength[g], total_length, mfp[g]);
 
   return phi;
 }
 
 
 void 
-UncollidedProblem::SweepBulkRegion()
+UncollidedProblem::SweepBulkRegion(const Vector3& pt_loc)
 {
   CALI_CXX_MARK_SCOPE("UncollidedProblem::SweepBulkRegion");
   log.Log() << "Sweeping bulk region.\n";
 
   const auto& sdm = *discretization_;
 
-  // Loop over bulk region cells
+  DenseMatrix<double> Amat(max_cell_dof_count_, max_cell_dof_count_);
+  DenseMatrix<double> Atemp(max_cell_dof_count_, max_cell_dof_count_);
+  std::vector<double> source(max_cell_dof_count_);
+
+  UncollidedMatrices matrices;
+
+  // Sweep bulk region cells
   for (int c : bulk_spls_) 
   {
     const Cell& cell = grid_->local_cells[c];
 
-    // Cell mapping
-    auto coord_sys = grid_->GetCoordinateSystem();
-    auto swf = SpatialWeightFunction::FromCoordinateType(coord_sys);
+    // Cell data
     const auto& cell_mapping = sdm.GetCellMapping(cell);
     const size_t cell_num_faces = cell.faces.size();
     const size_t cell_num_nodes = cell_mapping.GetNumNodes();
-    const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
+    const auto& transport_view = cell_transport_views_[c];
+    const auto& xs = transport_view.GetXS();
 
+    // Compute matrices
+    matrices = ComputeUncollidedIntegrals(cell, pt_loc);
+
+    // Zero right-hand side vectors
+    for (size_t g = 0; g < num_groups_; ++g)
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+        Phi_[g](i) = 0.;
+
+    // Gradient matrix
+    G_ = matrices.intV_shapeJ_omega_gradshapeI;
+
+    for (size_t i = 0; i < cell_num_nodes; ++i)
+      for (size_t j = 0; j < cell_num_nodes; ++j)
+        Amat(i, j) = G_(i, j);
+
+    // Surface matrices
+    for (size_t f = 0; f < cell_num_faces; ++f)
+    {
+      const size_t num_face_nodes = cell_mapping.GetNumFaceNodes(f);
+      M_surf_ = matrices.intS_omega_n_shapeI_shapeJ[f];
+
+      // Incoming faces (source terms)
+      if (cell_face_orientations_[c][f] == FaceOrientation::INCOMING)
+      {
+        size_t neighbor_id = cell.faces[f].neighbor_id;
+        size_t f_ = cell.faces[f].GetNeighborAdjacentFaceIndex(grid_.get());
+
+        const Cell& neighbor = grid_->local_cells[neighbor_id];
+        const auto& neighbor_mapping = sdm.GetCellMapping(neighbor);
+
+        for (size_t fi = 0; fi < num_face_nodes; ++fi)
+        {
+          const int i = cell_mapping.MapFaceNode(f, fi);
+
+          for (size_t fj = 0; fj < num_face_nodes; ++fj)
+          {
+            const int j = cell_mapping.MapFaceNode(f, fj);            
+
+            int k;
+            for (size_t fk = 0; fk < num_face_nodes; ++fk)
+            {
+              k = neighbor_mapping.MapFaceNode(f_, fk);
+              if (neighbor.vertex_ids[k] == cell.vertex_ids[j]) break;
+            }
+
+            const auto jr = sdm.MapDOFLocal(neighbor, k);
+            for (size_t g = 0; g < num_groups_; ++g) 
+            {
+              double phi_j = destination_phi_[jr + g];
+              Phi_[g](i) -= M_surf_(i, j) * phi_j;
+            }
+          }
+        }
+      }
+
+      // Outgoing faces (coefficient matrix)
+      if (cell_face_orientations_[c][f] == FaceOrientation::OUTGOING)
+      {
+        for (size_t fi = 0; fi < num_face_nodes; ++fi)
+        {
+          const int i = cell_mapping.MapFaceNode(f, fi);
+
+          for (size_t fj = 0; fj < num_face_nodes; ++fj)
+          {
+            const int j = cell_mapping.MapFaceNode(f, fj);
+
+            Amat(i, j) += M_surf_(i, j);
+          }
+        }
+      }
+    }
+
+    // Construct and solve linear system
+    M_ = unit_cell_matrices_[c].intV_shapeI_shapeJ;
+
+    for (size_t g = 0; g < num_groups_; ++g)
+    {
+      double total_xs = densities_local_[c] * xs.GetSigmaTotal()[g];
+
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+        for (size_t j = 0; j < cell_num_nodes; ++j)
+          Atemp(i, j) = Amat(i, j) + total_xs * M_(i, j);
+
+      // Solve system
+      GaussElimination(Atemp, Phi_[g], static_cast<int>(cell_num_nodes));
+    }
+
+    // Update flux solution
+    for (size_t i = 0; i < cell_num_nodes; ++i)
+    {
+      const auto ir = sdm.MapDOFLocal(cell, i);
+      for (size_t g = 0; g < num_groups_; ++g) destination_phi_[ir + g] = Phi_[g](i);
+    }
   }
 }
 
@@ -542,9 +666,8 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
   const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
 
   // Matrices
-  DenseMatrix<double> IntV_shapeJ_omega_gradshapeI(cell_num_nodes, cell_num_nodes);
+  DenseMatrix<double> IntV_shapeJ_omega_gradshapeI(cell_num_nodes, cell_num_nodes, 0.);
   std::vector<DenseMatrix<double>> IntS_omega_n_shapeI_shapeJ(cell_num_faces);
-
 
   // Gradient Matrix
   for (unsigned int i = 0; i < cell_num_nodes; ++i)
@@ -556,7 +679,7 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
         const Vector3& qp_xyz = fe_vol_data.QPointXYZ(qp);
         Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
 
-        IntV_shapeJ_omega_gradshapeI(i, j) += 
+        IntV_shapeJ_omega_gradshapeI(i, j) -= 
           (*swf)(qp_xyz) * 
           fe_vol_data.ShapeValue(j, qp) * 
           omega.Dot( fe_vol_data.ShapeGrad(i, qp) ) * 
@@ -564,7 +687,6 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
       } // for qp
     } // for j
   } // for i
-
 
   // Surface matrices
   for (size_t f = 0; f < cell_num_faces; ++f)
