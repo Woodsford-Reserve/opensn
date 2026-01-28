@@ -79,6 +79,19 @@ WrapMesh(py::module& mesh)
     py::arg("inside")
   );
   mesh_continuum.def(
+    "SetUniformBoundaryID",
+    &MeshContinuum::SetUniformBoundaryID,
+    R"(
+    Assign all boundary faces to a single name
+
+    Parameters
+    ----------
+    boundary_name: str
+        Name of the boundary to assign to all boundary faces
+    )",
+    py::arg("boundary_name")
+  );
+  mesh_continuum.def(
     "SetBoundaryIDFromLogicalVolume",
     &MeshContinuum::SetBoundaryIDFromLogicalVolume,
     R"(
@@ -133,13 +146,13 @@ WrapMesh(py::module& mesh)
   );
   mesh_continuum.def(
     "SetBlockIDFromFunction",
-    [](MeshContinuum& self, const std::function<int(Vector3, int)>& func)
+    [](MeshContinuum& self, const std::function<unsigned int(Vector3, unsigned int)>& func)
     {
       int local_num_cells_modified = 0;
       // change local cells
       for (Cell& cell : self.local_cells)
       {
-        int new_block_id = func(cell.centroid, cell.block_id);
+        auto new_block_id = func(cell.centroid, cell.block_id);
         if (cell.block_id != new_block_id)
         {
           cell.block_id = new_block_id;
@@ -151,7 +164,7 @@ WrapMesh(py::module& mesh)
       for (std::uint64_t ghost_id : ghost_ids)
       {
         Cell& cell = self.cells[ghost_id];
-        int new_block_id = func(cell.centroid, cell.block_id);
+        auto new_block_id = func(cell.centroid, cell.block_id);
         if (cell.block_id != new_block_id)
         {
           cell.block_id = new_block_id;
@@ -326,7 +339,13 @@ WrapMeshGenerator(py::module& mesh)
     replicated_mesh: bool, default=False
         Flag, when set, makes the mesh appear in full fidelity on each process.
     layers: List[Dict]
-        List of layers. Parameters of each layers are represented as Python dictionary.
+        List of layers. Each layer is a dictionary with entries:
+          - n: int, default=1
+              Number of sub-layers in this layer.
+          - h: float, default=1.0
+              Layer height. Cannot be specified if ``z`` is specified.
+          - z: float, default=0.0
+              Z-coordinate at the top of the layer. Cannot be specified if ``h`` is specified.
     top_boundary_name: str, default='ZMAX'
         The name to associate with the top boundary.
     bottom_boundary_name: str, default='ZMIN'

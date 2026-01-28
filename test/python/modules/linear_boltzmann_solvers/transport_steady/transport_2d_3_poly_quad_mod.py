@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     # Setup mesh
     meshgen = FromFileMeshGenerator(
-        filename="../../../../assets/mesh/SquareMesh2x2QuadsBlock.obj",
+        filename="../../../../assets/mesh/square_mesh2x2_quads_block.obj",
         partitioner=KBAGraphPartitioner(
             nx=2,
             ny=2,
@@ -43,6 +43,7 @@ if __name__ == "__main__":
         ),
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set block IDs
     grid.SetUniformBlockID(0)
@@ -87,7 +88,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0], "xs": xs_3_170},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {

@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     # Setup mesh
     meshgen = FromFileMeshGenerator(
-        filename="../../../../assets/mesh/Sphere.case",
+        filename="../../../../assets/mesh/sphere.case",
         partitioner=KBAGraphPartitioner(
             nx=2,
             ny=2,
@@ -75,7 +75,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_graphite},
         ],
-        scattering_order=0,
         volumetric_sources=[mg_src0, mg_src1],
     )
     ss_solver = SteadyStateSourceSolver(problem=phys)

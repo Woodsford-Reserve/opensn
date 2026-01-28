@@ -7,6 +7,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/angle_aggregation/angle_aggregation.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/groupset/lbs_groupset.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_structs.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/lbs_view.h"
 #include <functional>
 
 namespace opensn
@@ -19,14 +20,6 @@ public:
   /// Convenient typdef for the moment call back function. See moment_callbacks.
   using MomentCallbackFunc = std::function<void(SweepChunk* sweeper, AngleSet* angle_set)>;
 
-  /**
-   * Functions of type MomentCallbackFunc can be added to the moment_callbacks
-   * vector and these can be called from within functions taking a
-   * LBSGroupset instance. The intention is that this function can
-   * be used as a general interface to retrieve angular flux values
-   */
-  std::vector<MomentCallbackFunc> moment_callbacks;
-
   SweepChunk(std::vector<double>& destination_phi,
              std::vector<double>& destination_psi,
              const std::shared_ptr<MeshContinuum>& grid,
@@ -36,10 +29,10 @@ public:
              const std::vector<double>& densities,
              const std::vector<double>& source_moments,
              const LBSGroupset& groupset,
-             const std::map<int, std::shared_ptr<MultiGroupXS>>& xs,
-             int num_moments,
-             int max_num_cell_dofs,
-             int min_num_cell_dofs)
+             const BlockID2XSMap& xs,
+             size_t num_moments,
+             unsigned int max_num_cell_dofs,
+             unsigned int min_num_cell_dofs)
     : grid_(grid),
       discretization_(discretization),
       unit_cell_matrices_(unit_cell_matrices),
@@ -69,8 +62,6 @@ public:
   /// For cell-by-cell methods or computing the residual on a single cell.
   virtual void SetCell(Cell const* cell_ptr, AngleSet& angle_set) {}
 
-  virtual ~SweepChunk() = default;
-
   /**
    * Zero the portion of the output flux moments vector corresponding to the groupset for this
    * sweep chunk.
@@ -86,6 +77,19 @@ public:
   /// Returns the surface src-active flag.
   bool IsSurfaceSourceActive() const { return surface_source_active_; }
 
+  /// Include contribution from previous psi_n in RHS source term
+  void IncludeRHSTimeTerm(bool status) { include_rhs_time_term_ = status; }
+
+  virtual ~SweepChunk() = default;
+
+  /**
+   * Functions of type MomentCallbackFunc can be added to the moment_callbacks
+   * vector and these can be called from within functions taking a
+   * LBSGroupset instance. The intention is that this function can
+   * be used as a general interface to retrieve angular flux values
+   */
+  std::vector<MomentCallbackFunc> moment_callbacks;
+
 protected:
   const std::shared_ptr<MeshContinuum> grid_;
   const SpatialDiscretization& discretization_;
@@ -94,16 +98,17 @@ protected:
   const std::vector<double>& densities_;
   const std::vector<double>& source_moments_;
   const LBSGroupset& groupset_;
-  const std::map<int, std::shared_ptr<MultiGroupXS>>& xs_;
-  const int num_moments_;
-  const int max_num_cell_dofs_;
-  const int min_num_cell_dofs_;
+  const BlockID2XSMap& xs_;
+  const size_t num_moments_;
+  const unsigned int max_num_cell_dofs_;
+  const unsigned int min_num_cell_dofs_;
   const bool save_angular_flux_;
   const size_t groupset_angle_group_stride_;
   const size_t groupset_group_stride_;
   std::vector<double>& destination_phi_;
   std::vector<double>& destination_psi_;
   bool surface_source_active_ = false;
+  bool include_rhs_time_term_ = true;
 };
 
 } // namespace opensn

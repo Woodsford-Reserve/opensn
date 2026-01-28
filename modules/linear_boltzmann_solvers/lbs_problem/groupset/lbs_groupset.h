@@ -23,50 +23,6 @@ class LBSProblem;
 class LBSGroupset
 {
 public:
-  int id;
-  std::vector<LBSGroup> groups;
-  std::shared_ptr<AngularQuadrature> quadrature;
-  std::shared_ptr<AngleAggregation> angle_agg;
-  UniqueSOGroupings unique_so_groupings;
-  DirIDToSOMap dir_id_to_so_map;
-
-  int master_num_ang_subsets;
-
-  LinearSystemSolver::IterativeMethod iterative_method;
-  AngleAggregationType angleagg_method;
-  double residual_tolerance;
-  int max_iterations;
-  int gmres_restart_intvl;
-
-  bool allow_cycles;
-
-  bool apply_wgdsa;
-  bool apply_tgdsa;
-  int wgdsa_max_iters;
-  int tgdsa_max_iters;
-  double wgdsa_tol;
-  double tgdsa_tol;
-  bool wgdsa_verbose;
-  bool tgdsa_verbose;
-  std::string wgdsa_string;
-  std::string tgdsa_string;
-
-  void* quad_carrier = nullptr;
-
-  std::shared_ptr<DiffusionMIPSolver> wgdsa_solver = nullptr;
-  std::shared_ptr<DiffusionMIPSolver> tgdsa_solver = nullptr;
-
-  struct TwoGridAccelerationInfo
-  {
-    std::map<int, TwoGridCollapsedInfo> map_mat_id_2_tginfo;
-    EnergyCollapseScheme scheme = EnergyCollapseScheme::JFULL;
-  } tg_acceleration_info_;
-
-  UnknownManager psi_uk_man_;
-
-public:
-  static InputParameters GetInputParameters();
-
   /// Input parameters based constructor.
   explicit LBSGroupset(const InputParameters& params, int id, const LBSProblem& lbs_problem);
 
@@ -84,8 +40,52 @@ public:
 
   ~LBSGroupset();
 
+  int id;
+  std::vector<LBSGroup> groups;
+  std::shared_ptr<AngularQuadrature> quadrature;
+  std::shared_ptr<AngleAggregation> angle_agg;
+  UniqueSOGroupings unique_so_groupings;
+  DirIDToSOMap dir_id_to_so_map;
+
+  int master_num_ang_subsets;
+
+  LinearSystemSolver::IterativeMethod iterative_method;
+  AngleAggregationType angleagg_method;
+  double residual_tolerance;
+  unsigned int max_iterations;
+  unsigned int gmres_restart_intvl;
+
+  bool allow_cycles;
+
+  bool apply_wgdsa;
+  bool apply_tgdsa;
+  unsigned int wgdsa_max_iters;
+  unsigned int tgdsa_max_iters;
+  double wgdsa_tol;
+  double tgdsa_tol;
+  bool wgdsa_verbose;
+  bool tgdsa_verbose;
+  std::string wgdsa_string;
+  std::string tgdsa_string;
+
+  void* quad_carrier = nullptr;
+
+  std::shared_ptr<DiffusionMIPSolver> wgdsa_solver = nullptr;
+  std::shared_ptr<DiffusionMIPSolver> tgdsa_solver = nullptr;
+
+  struct TwoGridAccelerationInfo
+  {
+    std::map<unsigned int, TwoGridCollapsedInfo> map_mat_id_2_tginfo;
+    EnergyCollapseScheme scheme = EnergyCollapseScheme::JFULL;
+  } tg_acceleration_info_;
+
+  UnknownManager psi_uk_man_;
+
 private:
   void Init(int id);
+
+public:
+  static InputParameters GetInputParameters();
 };
 
 } // namespace opensn

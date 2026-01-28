@@ -96,11 +96,9 @@ if __name__ == "__main__":
         boundary_conditions=[
             {"name": "zmin", "type": "isotropic", "group_strength": bsrc},
         ],
-        scattering_order=5,
         volumetric_sources=[mg_src],
         options={
-            "max_ags_iterations": 1,
-            "save_angular_flux": True
+            "max_ags_iterations": 1
         },
         sweep_type="CBC"
     )

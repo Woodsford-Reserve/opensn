@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "caribou/caribou.h"
+#include "caribou/main.hpp"
 #include <vector>
 
 namespace crb = caribou;
@@ -12,8 +12,8 @@ namespace opensn
 {
 
 /**
- * @brief Memory pinner for an ``std::vector``.
- * @details Pin memory (lock the memory page) allocated by an ``std::vector`` to RAM and allocate
+ * \brief Memory pinner for an ``std::vector``.
+ * \details Pin memory (lock the memory page) allocated by an ``std::vector`` to RAM and allocate
  * its associated memory on GPU.
  */
 template <typename T>

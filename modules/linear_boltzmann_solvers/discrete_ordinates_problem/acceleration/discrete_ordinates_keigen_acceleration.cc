@@ -42,7 +42,7 @@ DiscreteOrdinatesKEigenAcceleration::DiscreteOrdinatesKEigenAcceleration(
   const InputParameters& params)
   : do_problem_(*params.GetSharedPtrParam<Problem, DiscreteOrdinatesProblem>("problem")),
     l_abs_tol_(params.GetParamValue<double>("l_abs_tol")),
-    max_iters_(params.GetParamValue<int>("max_iters")),
+    max_iters_(params.GetParamValue<unsigned int>("max_iters")),
     verbose_(params.GetParamValue<bool>("verbose")),
     petsc_options_(params.GetParamValue<std::string>("petsc_options")),
     pi_max_its_(params.GetParamValue<int>("pi_max_its")),
@@ -255,7 +255,7 @@ DiscreteOrdinatesKEigenAcceleration::CopyOnlyPhi0(const std::vector<double>& phi
   const auto& diff_sdm = diffusion_solver_->GetSpatialDiscretization();
   const auto& diff_uk_man = diffusion_solver_->GetUnknownStructure();
   const auto& phi_uk_man = do_problem_.GetUnknownManager();
-  const int gsi = front_gs_.groups.front().id;
+  const auto gsi = front_gs_.groups.front().id;
   const size_t gss = front_gs_.groups.size();
   const size_t diff_num_local_dofs = pwlc_ptr_ ? diff_sdm.GetNumLocalAndGhostDOFs(diff_uk_man)
                                                : diff_sdm.GetNumLocalDOFs(diff_uk_man);
@@ -294,7 +294,7 @@ DiscreteOrdinatesKEigenAcceleration::ProjectBackPhi0(const std::vector<double>& 
   const auto& diff_sdm = diffusion_solver_->GetSpatialDiscretization();
   const auto& diff_uk_man = diffusion_solver_->GetUnknownStructure();
   const auto& phi_uk_man = do_problem_.GetUnknownManager();
-  const int gsi = front_gs_.groups.front().id;
+  const auto gsi = front_gs_.groups.front().id;
   const size_t gss = front_gs_.groups.size();
   const size_t diff_num_local_dofs = pwlc_ptr_ ? diff_sdm.GetNumLocalAndGhostDOFs(diff_uk_man)
                                                : diff_sdm.GetNumLocalDOFs(diff_uk_man);

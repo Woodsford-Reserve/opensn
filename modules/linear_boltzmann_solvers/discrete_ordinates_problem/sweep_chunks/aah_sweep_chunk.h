@@ -14,11 +14,10 @@ namespace opensn
 {
 
 // experimental, to be moved to a higher level header file
-inline constexpr std::uint32_t max_dof = 8;
 static constexpr size_t simd_width =
-#if defined(__AVX512F__)
+#if __AVX512F__
   8; // 8 lanes (512-bit, doubles)
-#elif defined(__AVX2__)
+#elif __AVX2__
   4; // 4 lanes (256-bit, doubles)
 #else
   1; // scalar
@@ -29,33 +28,11 @@ class DiscreteOrdinatesProblem;
 class AAHSweepChunk : public SweepChunk
 {
 public:
-  AAHSweepChunk(const std::shared_ptr<MeshContinuum>& grid,
-                const SpatialDiscretization& discretization,
-                const std::vector<UnitCellMatrices>& unit_cell_matrices,
-                std::vector<CellLBSView>& cell_transport_views,
-                const std::vector<double>& densities,
-                std::vector<double>& destination_phi,
-                std::vector<double>& destination_psi,
-                const std::vector<double>& source_moments,
-                const LBSGroupset& groupset,
-                const std::map<int, std::shared_ptr<MultiGroupXS>>& xs,
-                int num_moments,
-                int max_num_cell_dofs,
-                int min_num_cell_dofs,
-                DiscreteOrdinatesProblem& problem,
-                size_t max_level_size,
-                size_t max_groupset_size,
-                size_t max_angleset_size,
-                bool use_gpus);
-
-  ~AAHSweepChunk() override;
+  AAHSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& groupset);
 
   void Sweep(AngleSet& angle_set) override;
 
 protected:
-  void CreateDeviceLevelVector();
-  void DestroyDeviceLevelVector();
-
   void CPUSweep(AngleSet& angle_set);
   void GPUSweep(AngleSet& angle_set);
 
@@ -70,7 +47,8 @@ private:
   CpuSweepFunc cpu_sweep_impl_ = nullptr;
 
   void CPUSweep_Generic(AngleSet& angle_set);
-  void CPUSweep_N4(AngleSet& angle_set);
+  template <int NumNodes>
+  void CPUSweep_FixedN(AngleSet& angle_set);
 };
 
 } // namespace opensn

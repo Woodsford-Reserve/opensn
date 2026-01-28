@@ -10,34 +10,21 @@
 namespace opensn
 {
 class FieldFunctionGridBased;
-class TimeStepper;
 
-/**
- * \defgroup SolverBase Base class for all solvers
- * \ingroup doc_PhysicsSolver
- */
 class Solver
 {
 public:
-  /// Returns the input parameters.
-  static InputParameters GetInputParameters();
   explicit Solver(std::string name);
   explicit Solver(const InputParameters& params);
   virtual ~Solver() = default;
 
   std::string GetName() const;
 
-  TimeStepper& GetTimeStepper();
-  const TimeStepper& GetTimeStepper() const;
-
   /// Initialize function.
   virtual void Initialize();
 
   /// Execution function.
   virtual void Execute();
-
-  /// Step function*/
-  virtual void Step();
 
   /// Advance time values function.
   virtual void Advance();
@@ -48,8 +35,15 @@ public:
   /// PreCheck call to GetInfo.
   ParameterBlock GetInfoWithPreCheck(const ParameterBlock& params) const;
 
+  bool IsBalanceEnabled() const { return compute_balance_; }
+
 private:
   const std::string name_;
+  bool compute_balance_ = false;
+
+public:
+  /// Returns the input parameters.
+  static InputParameters GetInputParameters();
 };
 
 } // namespace opensn

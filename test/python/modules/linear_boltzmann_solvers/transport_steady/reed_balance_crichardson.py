@@ -77,7 +77,6 @@ if __name__ == "__main__":
             },
         ],
         xs_map=xs_map,
-        scattering_order=0,
         volumetric_sources=[src0, src1],
         boundary_conditions=[
             {"name": "zmin", "type": "vacuum"},
@@ -86,9 +85,8 @@ if __name__ == "__main__":
     )
 
     # Initialize and execute solver
-    ss_solver = SteadyStateSourceSolver(problem=phys)
+    ss_solver = SteadyStateSourceSolver(problem=phys, compute_balance=True)
     ss_solver.Initialize()
     ss_solver.Execute()
 
     # compute particle balance
-    phys.ComputeBalance()

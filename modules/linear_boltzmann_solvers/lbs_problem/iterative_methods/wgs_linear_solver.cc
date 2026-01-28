@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/wgs_convergence_test.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_vecops.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/sweep_wgs_context.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
 #include "framework/logging/log.h"
 #include "framework/utils/timer.h"
@@ -23,8 +24,8 @@ WGSLinearSolver::WGSLinearSolver(const std::shared_ptr<WGSContext>& gs_context_p
   auto& groupset = gs_context_ptr->groupset;
   auto& solver_tol_options = this->GetToleranceOptions();
   solver_tol_options.residual_absolute = groupset.residual_tolerance;
-  solver_tol_options.maximum_iterations = groupset.max_iterations;
-  solver_tol_options.gmres_restart_interval = groupset.gmres_restart_intvl;
+  solver_tol_options.maximum_iterations = static_cast<PetscInt>(groupset.max_iterations);
+  solver_tol_options.gmres_restart_interval = static_cast<PetscInt>(groupset.gmres_restart_intvl);
 }
 
 WGSLinearSolver::~WGSLinearSolver()
@@ -75,7 +76,8 @@ WGSLinearSolver::SetSystem()
                  &A_);
 
   // Set the action-operator
-  MatShellSetOperation(A_, MATOP_MULT, (void (*)())LinearSolverMatrixAction);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast,modernize-redundant-void-arg)
+  MatShellSetOperation(A_, MATOP_MULT, (void (*)(void))LinearSolverMatrixAction);
 
   // Set solver operators
   KSPSetOperators(ksp_, A_, A_);
@@ -106,12 +108,9 @@ WGSLinearSolver::PreSolveCallback()
   auto& do_problem = gs_context_ptr->do_problem;
   if (do_problem.GetOptions().verbose_inner_iterations)
   {
-    log.Log() << "\n\n"
-              << "********** Solving groupset " << groupset.id << " with "
-              << this->GetIterativeMethodName() << "\n\n"
-              << "Quadrature number of angles: " << groupset.quadrature->abscissae.size() << "\n"
-              << "Groups " << groupset.groups.front().id << " " << groupset.groups.back().id
-              << "\n\n";
+    log.Log() << "Solving groupset " << groupset.id << " with " << this->GetIterativeMethodName()
+              << " (groups " << groupset.groups.front().id << "-" << groupset.groups.back().id
+              << ", " << groupset.quadrature->abscissae.size() << " angles)\n";
   }
   gs_context_ptr->PreSolveCallback();
 }
@@ -163,6 +162,15 @@ WGSLinearSolver::SetRHS()
     const auto scope = gs_context_ptr->rhs_src_scope | ZERO_INCOMING_DELAYED_PSI;
     gs_context_ptr->set_source_function(
       groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
+
+    // Enable RHS time (tau*psi^n)
+    if (do_problem.IsTimeDependent())
+    {
+      auto sweep_ctx = std::dynamic_pointer_cast<SweepWGSContext>(gs_context_ptr);
+      if (!sweep_ctx)
+        throw std::runtime_error("MatrixAction requires SweepWGSContext.");
+      sweep_ctx->sweep_chunk->IncludeRHSTimeTerm(true);
+    }
 
     // Apply transport operator
     gs_context_ptr->ApplyInverseTransportOperator(scope);

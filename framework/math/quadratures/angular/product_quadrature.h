@@ -13,28 +13,7 @@ namespace opensn
 /// Class for product quadratures
 class ProductQuadrature : public AngularQuadrature
 {
-protected:
-  double weight_sum_;
-
-  /// Linear indices of ordered directions mapped to polar level.
-  std::map<unsigned int, std::vector<unsigned int>> map_directions_;
-
-  ProductQuadrature(int dimension, int scattering_order)
-    : AngularQuadrature(AngularQuadratureType::ProductQuadrature, dimension, scattering_order),
-      weight_sum_(0.0)
-  {
-  }
-
-  /// Initializes the quadrature with custom angles and weights.
-  void AssembleCosines(const std::vector<double>& azimuthal,
-                       const std::vector<double>& polar,
-                       const std::vector<double>& wts,
-                       bool verbose);
-
 public:
-  std::vector<double> polar_ang;
-  std::vector<double> azimu_ang;
-
   ~ProductQuadrature() override = default;
 
   /**
@@ -52,22 +31,45 @@ public:
   {
     return map_directions_;
   }
+
+  std::vector<double> polar_ang;
+  std::vector<double> azimu_ang;
+
+protected:
+  ProductQuadrature(unsigned int dimension, unsigned int scattering_order)
+    : AngularQuadrature(AngularQuadratureType::ProductQuadrature, dimension, scattering_order),
+      weight_sum_(0.0)
+  {
+  }
+
+  /// Initializes the quadrature with custom angles and weights.
+  void AssembleCosines(const std::vector<double>& azimuthal,
+                       const std::vector<double>& polar,
+                       const std::vector<double>& wts,
+                       bool verbose);
+
+  double weight_sum_;
+
+  /// Linear indices of ordered directions mapped to polar level.
+  std::map<unsigned int, std::vector<unsigned int>> map_directions_;
 };
 
 class GLProductQuadrature1DSlab : public ProductQuadrature
 {
 public:
   /// Constructor for 1D slab Gauss-Legendre product quadrature
-  explicit GLProductQuadrature1DSlab(int Npolar, int scattering_order, bool verbose = false);
+  explicit GLProductQuadrature1DSlab(unsigned int Npolar,
+                                     unsigned int scattering_order,
+                                     bool verbose = false);
 };
 
 class GLCProductQuadrature2DXY : public ProductQuadrature
 {
 public:
   /// Constructor for 2D XY Gauss-Legendre Chebyshev product quadrature
-  explicit GLCProductQuadrature2DXY(int Npolar,
-                                    int Nazimuthal,
-                                    int scattering_order,
+  explicit GLCProductQuadrature2DXY(unsigned int Npolar,
+                                    unsigned int Nazimuthal,
+                                    unsigned int scattering_order,
                                     bool verbose = false);
 };
 
@@ -75,9 +77,9 @@ class GLCProductQuadrature3DXYZ : public ProductQuadrature
 {
 public:
   /// Constructor for 3D XYZ Gauss-Legendre Chebyshev product quadrature
-  explicit GLCProductQuadrature3DXYZ(int Npolar,
-                                     int Nazimuthal,
-                                     int scattering_order,
+  explicit GLCProductQuadrature3DXYZ(unsigned int Npolar,
+                                     unsigned int Nazimuthal,
+                                     unsigned int scattering_order,
                                      bool verbose = false);
 };
 

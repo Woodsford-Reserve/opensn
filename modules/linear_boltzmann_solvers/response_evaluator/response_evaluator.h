@@ -60,24 +60,25 @@ private:
   using AngularFluxBuffer = std::vector<std::vector<double>>;
   using AdjointBuffer = std::pair<FluxMomentBuffer, AngularFluxBuffer>;
 
-  using MaterialSources = std::map<int, std::vector<double>>;
+  using MaterialSources = std::map<unsigned int, std::vector<double>>;
   using PointSources = std::vector<std::shared_ptr<PointSource>>;
   using VolumetricSources = std::vector<std::shared_ptr<VolumetricSource>>;
-  using BoundarySources = std::map<uint64_t, BoundaryPreference>;
+  struct BoundarySource
+  {
+    LBSBoundaryType type = LBSBoundaryType::VACUUM;
+    std::vector<double> isotropic_mg_source;
+  };
+  using BoundarySources = std::map<uint64_t, BoundarySource>;
 
 public:
   explicit ResponseEvaluator(const InputParameters& params);
 
-  static InputParameters GetOptionsBlock();
   void SetOptions(const InputParameters& params);
 
-  static InputParameters GetBufferOptionsBlock();
   void SetBufferOptions(const InputParameters& input);
 
-  static InputParameters GetSourceOptionsBlock();
   void SetSourceOptions(const InputParameters& input);
 
-  static InputParameters GetMaterialSourceOptionsBlock();
   void SetMaterialSourceOptions(const InputParameters& params);
 
   void SetBoundarySourceOptions(const InputParameters& params);
@@ -88,6 +89,8 @@ public:
   void AddResponseBuffers(const InputParameters& params);
 
   void AddResponseSources(const InputParameters& params);
+
+  static InputParameters GetBoundarySourceOptionsBlock();
 
   /**
    * Evaluate a response using the specified adjoint buffer with the currently defined sources in
@@ -109,7 +112,6 @@ private:
                                                 const LBSGroupset& groupset,
                                                 double time = 0.0) const;
 
-private:
   std::shared_ptr<DiscreteOrdinatesProblem> do_problem_;
 
   std::map<std::string, AdjointBuffer> adjoint_buffers_;
@@ -123,6 +125,11 @@ public:
   /// Returns the input parameters for this object.
   static InputParameters GetInputParameters();
   static std::shared_ptr<ResponseEvaluator> Create(const ParameterBlock& params);
+
+  static InputParameters GetOptionsBlock();
+  static InputParameters GetBufferOptionsBlock();
+  static InputParameters GetSourceOptionsBlock();
+  static InputParameters GetMaterialSourceOptionsBlock();
 };
 
 } // namespace opensn

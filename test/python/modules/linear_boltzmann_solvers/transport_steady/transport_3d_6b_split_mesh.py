@@ -17,10 +17,11 @@ if "opensn_console" not in globals():
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
     from pyopensn.mesh import SplitFileMeshGenerator, OrthogonalMeshGenerator, ExtruderMeshGenerator
     from pyopensn.xs import MultiGroupXS
+    from pyopensn.logvol import RPPLogicalVolume
+    from pyopensn.fieldfunc import FieldFunctionInterpolationVolume
     from pyopensn.source import VolumetricSource
     from pyopensn.aquad import GLCProductQuadrature3DXYZ
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver
-    from pyopensn.post import CellVolumeIntegralPostProcessor
 
 if __name__ == "__main__":
 
@@ -67,6 +68,7 @@ if __name__ == "__main__":
     )
     grid = meshgen.Execute()
     grid.SetUniformBlockID(0)
+    grid.SetOrthogonalBoundaries()
 
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
 
@@ -103,7 +105,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0], "xs": xs_graphite},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src],
         boundary_conditions=[
             {"name": "xmin", "type": "isotropic", "group_strength": bsrc},

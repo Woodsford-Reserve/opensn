@@ -18,16 +18,6 @@ class SweepChunk;
 
 class AngleSet
 {
-protected:
-  const size_t id_;
-  const size_t num_groups_;
-  const SPDS& spds_;
-  std::shared_ptr<FLUDS> fluds_;
-  std::vector<std::uint32_t> angles_;
-  std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries_;
-  bool executed_ = false;
-  void* memory_pin_ = nullptr;
-
 public:
   AngleSet(size_t id,
            size_t num_groups,
@@ -102,7 +92,7 @@ public:
                                     uint64_t cell_local_id,
                                     unsigned int face_num,
                                     unsigned int fi,
-                                    int g,
+                                    unsigned int g,
                                     bool surface_source_active) = 0;
 
   /// Returns a pointer to outbound reflected flux data.
@@ -119,6 +109,16 @@ public:
   void ResetMemoryPin();
 
   virtual ~AngleSet();
+
+protected:
+  const size_t id_;
+  const size_t num_groups_;
+  const SPDS& spds_;
+  std::shared_ptr<FLUDS> fluds_;
+  std::vector<std::uint32_t> angles_;
+  std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries_;
+  bool executed_ = false;
+  void* memory_pin_ = nullptr;
 };
 
 } // namespace opensn

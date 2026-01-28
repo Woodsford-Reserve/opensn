@@ -36,7 +36,7 @@ if __name__ == "__main__":
     meshgen = ExtruderMeshGenerator(
         inputs=[
             FromFileMeshGenerator(
-                filename="../../../../assets/mesh/Square2x2_partition_cyclic3.obj"
+                filename="../../../../assets/mesh/square2x2_partition_cyclic3.obj"
             )
         ],
         layers=[{"z": 0.4, "n": 2},
@@ -51,6 +51,7 @@ if __name__ == "__main__":
             ycuts=[0.0], ),
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set block IDs
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
@@ -92,7 +93,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_graphite},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {"name": "zmax", "type": "isotropic", "group_strength": bsrc},

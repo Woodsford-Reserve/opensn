@@ -81,12 +81,27 @@ _add_cxx_cfg(Native "-fno-trapping-math")
 _add_cxx_cfg(Native "-ffp-contract=fast")
 
 option(OPENSN_WITH_CUDA "Enable CUDA support" OFF)
+option(OPENSN_WITH_HIP "Enable HIP support" OFF)
+if (OPENSN_WITH_CUDA AND OPENSN_WITH_HIP)
+  message(FATAL_ERROR "Cannot enable both CUDA and HIP support at the same time")
+endif()
 if (OPENSN_WITH_CUDA)
   set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
   find_package(CUDAToolkit 12.0 REQUIRED)
   message(STATUS "CUDA support enabled")
   message(STATUS "CUDA architectures detected: ${CMAKE_CUDA_ARCHITECTURES}")
   enable_language(CUDA)
+endif()
+if (OPENSN_WITH_HIP)
+  find_package(HIP REQUIRED)
+  message(STATUS "HIP support enabled")
+  message(STATUS "HIP platform: ${CMAKE_HIP_PLATFORM}")
+  message(STATUS "HIP architectures detected: ${CMAKE_HIP_ARCHITECTURES}")
+  enable_language(HIP)
+endif()
+set(OPENSN_WITH_GPU OFF)
+if (OPENSN_WITH_CUDA OR OPENSN_WITH_HIP)
+  set(OPENSN_WITH_GPU ON FORCE)
 endif()
 option(OPENSN_WITH_PYTHON "Build with python support" ON)
 option(OPENSN_WITH_PYTHON_MODULE "Build with python module" OFF)
@@ -97,6 +112,7 @@ endif()
 
 # dependencies
 find_package(MPI REQUIRED)
+find_package(mpicpp-lite 2.2 REQUIRED)
 
 find_package(HDF5 REQUIRED COMPONENTS C HL)
 find_package(Boost CONFIG)
@@ -147,13 +163,30 @@ else()
 endif()
 
 find_package(PETSc 3.17 REQUIRED)
+# Check PETSc uses 64bit indices
 check_symbol_exists(PETSC_USE_64BIT_INDICES "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_USE_64BIT_INDICES)
 if(NOT ${PETSC_USE_64BIT_INDICES} MATCHES 1)
   message(FATAL_ERROR "PETSc has not been configured with the flag --with-64-bit-indices\n")
 endif()
+
+# Check PETSc includes support for PTSCOTCH
 check_symbol_exists(PETSC_HAVE_PTSCOTCH "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_HAVE_PTSCOTCH)
 if(NOT ${PETSC_HAVE_PTSCOTCH} MATCHES 1)
   message(FATAL_ERROR "PETSc has not been configured with PTSCOTCH\n")
+endif()
+
+# Check PetscScalar is double
+check_symbol_exists(PETSC_USE_REAL_DOUBLE "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_USE_REAL_DOUBLE)
+if(NOT PETSC_USE_REAL_DOUBLE)
+  message(FATAL_ERROR
+    "PETSc has not been configured with double precision reals.\n"
+    "Reconfigure PETSc with --with-precision=double")
+endif()
+check_symbol_exists(PETSC_USE_COMPLEX "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_USE_COMPLEX)
+if(PETSC_USE_COMPLEX)
+  message(FATAL_ERROR
+    "PETSc has been configured with complex scalars.\n"
+    "Reconfigure PETSc with --with-scalar-type=real")
 endif()
 
 find_package(caliper REQUIRED)
@@ -175,20 +208,17 @@ endif()
 
 # compile options
 set(OPENSN_CXX_FLAGS)
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  if (NOT OPENSN_WITH_CUDA)
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang.*")
+  if (NOT OPENSN_WITH_GPU)
     list(APPEND OPENSN_CXX_FLAGS "-pedantic")
   endif()
   list(APPEND OPENSN_CXX_FLAGS "-Wall")
   list(APPEND OPENSN_CXX_FLAGS "-Wno-unused-variable")
   list(APPEND OPENSN_CXX_FLAGS "-Wno-c11-extensions")
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-  list(APPEND OPENSN_CXX_FLAGS "-pedantic")
-  list(APPEND OPENSN_CXX_FLAGS "-Wall")
-  list(APPEND OPENSN_CXX_FLAGS "-Wno-unused-variable")
-  list(APPEND OPENSN_CXX_FLAGS "-Wno-c11-extensions")
+  list(APPEND OPENSN_CXX_FLAGS "-Wno-deprecated-builtins")
+  list(APPEND OPENSN_CXX_FLAGS "-Wno-deprecated-declarations")
 elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-  if (NOT OPENSN_WITH_CUDA)
+  if (NOT OPENSN_WITH_GPU)
     list(APPEND OPENSN_CXX_FLAGS "-pedantic")
   endif()
   list(APPEND OPENSN_CXX_FLAGS "-Wall")
@@ -208,76 +238,91 @@ file(GLOB_RECURSE LIBOPENSN_SRCS CONFIGURE_DEPENDS
     modules/*.cc
 )
 
-if (OPENSN_WITH_CUDA)
-  file(GLOB_RECURSE LIBOPENSN_CUDA_SRCS CONFIGURE_DEPENDS modules/*.cu)
-  add_library(libopensncuda STATIC ${LIBOPENSN_CUDA_SRCS})
+if (OPENSN_WITH_GPU)
+  file(GLOB_RECURSE LIBOPENSNGPU_SRCS CONFIGURE_DEPENDS modules/*.cu)
+  if (OPENSN_WITH_CUDA)
+    set_source_files_properties(${LIBOPENSNGPU_SRCS} PROPERTIES LANGUAGE CUDA)
+  elseif (OPENSN_WITH_HIP)
+    set_source_files_properties(${LIBOPENSNGPU_SRCS} PROPERTIES LANGUAGE HIP)
+  endif()
+  add_library(libopensngpu STATIC ${LIBOPENSNGPU_SRCS})
 endif()
 
 add_library(libopensn SHARED ${LIBOPENSN_SRCS})
 
-if (OPENSN_WITH_CUDA)
-  target_compile_options(libopensncuda PRIVATE --expt-extended-lambda --expt-relaxed-constexpr)
-  target_compile_features(libopensncuda PUBLIC cuda_std_20)
-  target_compile_definitions(libopensncuda PRIVATE __OPENSN_USE_CUDA__)
-  target_compile_definitions(libopensn PRIVATE __OPENSN_USE_CUDA__)
-  set_property(TARGET libopensncuda PROPERTY POSITION_INDEPENDENT_CODE ON)
-  set_property(TARGET libopensncuda PROPERTY OUTPUT_NAME opensncuda)
+if (OPENSN_WITH_GPU)
+  if (OPENSN_WITH_CUDA)
+    target_compile_options(libopensngpu PRIVATE --expt-extended-lambda --expt-relaxed-constexpr)
+    target_compile_options(libopensngpu PRIVATE $<BUILD_INTERFACE:-diag-suppress 1301>)
+    target_compile_features(libopensngpu PUBLIC cuda_std_20)
+  elseif (OPENSN_WITH_HIP)
+    set_property(TARGET libopensngpu PROPERTY HIP_STANDARD 20)
+    set_property(TARGET libopensngpu PROPERTY HIP_STANDARD_REQUIRED ON)
+  endif()
+  target_compile_definitions(libopensngpu PRIVATE __OPENSN_WITH_GPU__)
+  target_compile_definitions(libopensn PRIVATE __OPENSN_WITH_GPU__)
+  set_property(TARGET libopensngpu PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET libopensngpu PROPERTY OUTPUT_NAME opensngpu)
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    target_compile_options(libopensngpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v>)
+  endif()
 endif()
 
 target_include_directories(libopensn
     PRIVATE
-    $<INSTALL_INTERFACE:include/opensn>
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/external
     PUBLIC
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/opensn>
     $<BUILD_INTERFACE:${HDF5_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${caliper_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${PETSC_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
 )
-if (OPENSN_WITH_CUDA)
-  target_include_directories(libopensncuda PUBLIC $<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>)
-  target_compile_options(libopensncuda PRIVATE $<BUILD_INTERFACE:${OPENSN_CXX_FLAGS}>)
-  target_compile_options(libopensncuda PRIVATE $<BUILD_INTERFACE:-diag-suppress 1301>)
-  target_compile_options(libopensncuda PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CUDA>>:
+
+if (OPENSN_WITH_GPU)
+  target_include_directories(libopensngpu PUBLIC $<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>)
+  target_compile_options(libopensngpu PRIVATE $<BUILD_INTERFACE:${OPENSN_CXX_FLAGS}>)
+  set(GPU_LANG_CONDITION $<OR:$<COMPILE_LANGUAGE:CUDA>,$<COMPILE_LANGUAGE:HIP>>)
+  target_compile_options(libopensngpu PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:GNU>,${GPU_LANG_CONDITION}>:
     $<BUILD_INTERFACE:-Wno-deprecated-declarations -Wno-non-template-friend -Wno-parentheses>>
   )
-  target_compile_options(libopensncuda PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:Clang>,$<COMPILE_LANGUAGE:CUDA>>:
+  target_compile_options(libopensngpu PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:Clang>,${GPU_LANG_CONDITION}>:
     $<BUILD_INTERFACE:-Wno-unused-function -Wno-constant-logical-operand>>
   )
-  target_include_directories(libopensncuda
+  target_include_directories(libopensngpu
       PRIVATE
-      $<INSTALL_INTERFACE:include/opensn>
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${PROJECT_SOURCE_DIR}
       ${PROJECT_SOURCE_DIR}/external
       PUBLIC
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/opensn>
       $<BUILD_INTERFACE:${HDF5_INCLUDE_DIRS}>
       $<BUILD_INTERFACE:${caliper_INCLUDE_DIR}>
       $<BUILD_INTERFACE:${PETSC_INCLUDE_DIR}>
       $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
   )
-  target_link_libraries(libopensncuda PRIVATE MPI::MPI_CXX)
+  target_link_libraries(libopensngpu PRIVATE MPI::MPI_CXX)
 endif()
 
 target_link_libraries(libopensn
-    PRIVATE
+    PUBLIC
     ${PETSC_LIBRARY}
     ${VTK_LIBRARIES}
     caliper
     ${HDF5_LIBRARIES}
+    mpicpp-lite::mpicpp-lite
     MPI::MPI_CXX
 )
-if (OPENSN_WITH_CUDA)
-  target_link_libraries(libopensncuda PRIVATE ${CUDA_LIBRARIES} CUDA::cublas)
-  target_link_libraries(libopensn INTERFACE libopensncuda)
+if (OPENSN_WITH_GPU)
+  target_link_libraries(libopensn INTERFACE libopensngpu)
 endif()
 
 target_compile_options(libopensn PRIVATE ${OPENSN_CXX_FLAGS})
@@ -289,6 +334,11 @@ set_target_properties(
         SOVERSION ${PROJECT_VERSION_MAJOR}
         OUTPUT_NAME opensn
 )
+
+set_target_properties(libopensn PROPERTIES EXPORT_NAME opensn)
+if (OPENSN_WITH_GPU)
+  set_target_properties(libopensngpu PROPERTIES EXPORT_NAME opensngpu)
+endif()
 
 if(OPENSN_WITH_PYTHON)
   add_subdirectory(python)
@@ -311,7 +361,7 @@ endif()
 
 configure_file(config.h.in config.h)
 
-# install
+# find_package(OpenSn)
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/OpenSnConfig.cmake.in
     OpenSnConfig.cmake
@@ -328,20 +378,20 @@ write_basic_package_version_file(
 install(
     TARGETS libopensn
     EXPORT openSnTargets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if(OPENSN_WITH_CUDA)
+if(OPENSN_WITH_GPU)
   install(
-        TARGETS libopensncuda
+        TARGETS libopensngpu
         EXPORT openSnTargets
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
@@ -381,13 +431,16 @@ install(
 
 if(OPENSN_WITH_PYTHON)
   install(
-        TARGETS opensn libopensnpy
-        EXPORT openSnTargets
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        RUNTIME DESTINATION bin
+        TARGETS opensn
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
-
+  install(
+        TARGETS libopensnpy
+        EXPORT openSnTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
   install(
         DIRECTORY ${CMAKE_SOURCE_DIR}/python
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/opensn

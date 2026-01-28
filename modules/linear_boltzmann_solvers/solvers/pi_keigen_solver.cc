@@ -5,7 +5,6 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_vecops.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_compute.h"
-#include "framework/logging/log_exceptions.h"
 #include "framework/logging/log.h"
 #include "framework/utils/timer.h"
 #include "framework/utils/hdf_utils.h"
@@ -14,6 +13,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/discrete_ordinates_keigen_acceleration.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/ags_linear_solver.h"
 #include <iomanip>
+#include <stdexcept>
 #include "sys/stat.h"
 
 namespace opensn
@@ -52,7 +52,7 @@ PowerIterationKEigenSolver::PowerIterationKEigenSolver(const InputParameters& pa
     do_problem_(params.GetSharedPtrParam<Problem, DiscreteOrdinatesProblem>("problem")),
     acceleration_(
       params.GetSharedPtrParam<DiscreteOrdinatesKEigenAcceleration>("acceleration", false)),
-    max_iters_(params.GetParamValue<size_t>("max_iters")),
+    max_iters_(params.GetParamValue<unsigned int>("max_iters")),
     k_eff_(1.0),
     k_tolerance_(params.GetParamValue<double>("k_tol")),
     F_prev_(1.0),
@@ -63,6 +63,11 @@ PowerIterationKEigenSolver::PowerIterationKEigenSolver(const InputParameters& pa
     groupsets_(do_problem_->GetGroupsets()),
     front_gs_(groupsets_.front())
 {
+  if (do_problem_->IsTimeDependent())
+  {
+    throw std::runtime_error(
+      "PowerIterationKEigenSolver cannot be used with a time-dependent DiscreteOrdinatesProblem.");
+  }
 }
 
 void
@@ -116,7 +121,7 @@ PowerIterationKEigenSolver::Execute()
   double k_eff_change = 1.0;
 
   // Start power iterations
-  size_t nit = 0;
+  unsigned int nit = 0;
   bool converged = false;
   while (nit < max_iters_)
   {
@@ -200,6 +205,11 @@ PowerIterationKEigenSolver::Execute()
   }
 
   do_problem_->UpdateFieldFunctions();
+  if (IsBalanceEnabled())
+  {
+    ComputeBalance(*do_problem_, 1.0 / k_eff_);
+    log.Log() << "Balance table uses k-eigenvalue normalization (production scaled by 1/k_eff)";
+  }
 
   log.Log() << "LinearBoltzmann::KEigenvalueSolver execution completed\n\n";
 }

@@ -15,6 +15,7 @@
 #include "framework/runtime.h"
 #include <algorithm>
 #include <set>
+#include <stdexcept>
 
 namespace opensn
 {
@@ -27,11 +28,62 @@ MeshContinuum::MeshContinuum()
           global_cell_id_to_nonlocal_id_map_),
     dim_(0),
     mesh_type_(UNSTRUCTURED),
-    coord_sys_(CoordinateSystemType::CARTESIAN),
+    coord_sys_(CoordinateSystemType::UNDEFINED),
     extruded_(false),
     num_partitions_(opensn::mpi_comm.size()),
     global_vertex_count_(0)
 {
+}
+
+GeometryType
+MeshContinuum::GetGeometryType() const
+{
+  switch (coord_sys_)
+  {
+    case CoordinateSystemType::CARTESIAN:
+    {
+      switch (dim_)
+      {
+        case 1:
+          return GeometryType::ONED_SLAB;
+        case 2:
+          return GeometryType::TWOD_CARTESIAN;
+        case 3:
+          return GeometryType::THREED_CARTESIAN;
+        default:
+          break;
+      }
+      break;
+    }
+    case CoordinateSystemType::CYLINDRICAL:
+    {
+      switch (dim_)
+      {
+        case 1:
+          return GeometryType::ONED_CYLINDRICAL;
+        case 2:
+          return GeometryType::TWOD_CYLINDRICAL;
+        default:
+          break;
+      }
+      break;
+    }
+    case CoordinateSystemType::SPHERICAL:
+    {
+      switch (dim_)
+      {
+        case 1:
+          return GeometryType::ONED_SPHERICAL;
+        default:
+          break;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  return GeometryType::INVALID;
 }
 
 std::array<size_t, 3>
@@ -119,6 +171,33 @@ MeshContinuum::SetOrthogonalBoundaries()
 {
   log.Log() << program_timer.GetTimeString() << " Setting orthogonal boundaries.";
 
+  // Add boundaries
+  std::vector<std::string> boundary_names;
+  switch (GetDimension())
+  {
+    case 1:
+      boundary_names = {"zmin", "zmax"};
+      break;
+
+    case 2:
+      boundary_names = {"xmin", "xmax", "ymin", "ymax"};
+      break;
+
+    case 3:
+      boundary_names = {"xmin", "xmax", "ymin", "ymax", "zmin", "zmax"};
+      break;
+
+    default:
+      throw std::runtime_error("Unsupported spatial dimension");
+  }
+
+  for (auto& name : boundary_names)
+  {
+    uint64_t bndry_id = MakeBoundaryID(name);
+    GetBoundaryIDMap()[bndry_id] = name;
+    GetBoundaryNameMap()[name] = bndry_id;
+  }
+
   const Vector3 ihat(1.0, 0.0, 0.0);
   const Vector3 jhat(0.0, 1.0, 0.0);
   const Vector3 khat(0.0, 0.0, 1.0);
@@ -133,23 +212,19 @@ MeshContinuum::SetOrthogonalBoundaries()
 
         std::string boundary_name;
         if (n.Dot(ihat) < -0.99999)
-          boundary_name = "XMIN";
+          boundary_name = "xmin";
         else if (n.Dot(ihat) > 0.99999)
-          boundary_name = "XMAX";
+          boundary_name = "xmax";
         else if (n.Dot(jhat) < -0.99999)
-          boundary_name = "YMIN";
+          boundary_name = "ymin";
         else if (n.Dot(jhat) > 0.99999)
-          boundary_name = "YMAX";
+          boundary_name = "ymax";
         else if (n.Dot(khat) < -0.99999)
-          boundary_name = "ZMIN";
+          boundary_name = "zmin";
         else if (n.Dot(khat) > 0.99999)
-          boundary_name = "ZMAX";
+          boundary_name = "zmax";
 
-        uint64_t bndry_id = MakeBoundaryID(boundary_name);
-
-        face.neighbor_id = bndry_id;
-
-        GetBoundaryIDMap()[bndry_id] = boundary_name;
+        face.neighbor_id = GetBoundaryNameMap().at(boundary_name);
       }
     }
   }
@@ -542,7 +617,7 @@ MeshContinuum::GetLocalBoundingBox() const
 }
 
 void
-MeshContinuum::SetUniformBlockID(const int blk_id)
+MeshContinuum::SetUniformBlockID(const unsigned int blk_id)
 {
   for (auto& cell : local_cells)
     cell.block_id = blk_id;
@@ -557,7 +632,9 @@ MeshContinuum::SetUniformBlockID(const int blk_id)
 }
 
 void
-MeshContinuum::SetBlockIDFromLogicalVolume(const LogicalVolume& log_vol, int blk_id, bool sense)
+MeshContinuum::SetBlockIDFromLogicalVolume(const LogicalVolume& log_vol,
+                                           unsigned int blk_id,
+                                           bool sense)
 {
   int num_cells_modified = 0;
   for (auto& cell : local_cells)
@@ -586,12 +663,30 @@ MeshContinuum::SetBlockIDFromLogicalVolume(const LogicalVolume& log_vol, int blk
 }
 
 void
+MeshContinuum::SetUniformBoundaryID(const std::string& boundary_name)
+{
+  auto bndry_id = MakeBoundaryID(boundary_name);
+  for (auto& cell : local_cells)
+  {
+    for (auto& face : cell.faces)
+    {
+      if (face.has_neighbor)
+        continue;
+      face.neighbor_id = bndry_id;
+    }
+  }
+  GetBoundaryIDMap()[bndry_id] = boundary_name;
+  GetBoundaryNameMap()[boundary_name] = bndry_id;
+}
+
+void
 MeshContinuum::SetBoundaryIDFromLogicalVolume(const LogicalVolume& log_vol,
                                               const std::string& boundary_name,
                                               const bool sense)
 {
   // Check if name already has id
   auto& grid_bndry_id_map = GetBoundaryIDMap();
+  auto& grid_bndry_name_map = GetBoundaryNameMap();
   uint64_t bndry_id = MakeBoundaryID(boundary_name);
 
   // Loop over cells
@@ -614,7 +709,10 @@ MeshContinuum::SetBoundaryIDFromLogicalVolume(const LogicalVolume& log_vol,
   mpi_comm.all_reduce(num_faces_modified, global_num_faces_modified, mpi::op::sum<int>());
 
   if (global_num_faces_modified > 0 and grid_bndry_id_map.count(bndry_id) == 0)
+  {
     grid_bndry_id_map[bndry_id] = boundary_name;
+    grid_bndry_name_map[boundary_name] = bndry_id;
+  }
 }
 
 Vector3
@@ -759,21 +857,21 @@ MeshContinuum::MapCellFace(const Cell& cur_cell, const Cell& adj_cell, const uns
   throw std::logic_error("MeshContinuum::MapCellFace: Mapping failure.");
 }
 
-std::map<int, double>
+std::map<unsigned int, double>
 MeshContinuum::ComputeVolumePerBlockID() const
 {
   // Create a map to hold local volume with local block as key
-  std::map<int, double> block_volumes;
+  std::map<unsigned int, double> block_volumes;
   for (const auto& cell : this->local_cells)
     block_volumes[cell.block_id] += cell.volume;
 
   // Collect all local block IDs
-  std::set<int> unique_block_ids;
+  std::set<unsigned int> unique_block_ids;
   for (const auto& [matid, vol] : block_volumes)
     unique_block_ids.insert(matid);
 
   // convert set to vector
-  const std::vector<int> local_block_ids(unique_block_ids.begin(), unique_block_ids.end());
+  const std::vector<unsigned int> local_block_ids(unique_block_ids.begin(), unique_block_ids.end());
   const auto local_size = static_cast<int>(local_block_ids.size());
 
   // Initialize vector to hold sizes from all processes
@@ -791,12 +889,12 @@ MeshContinuum::ComputeVolumePerBlockID() const
   }
 
   // Initialize vector to hold all block IDs from all processes
-  std::vector<int> global_block_ids(total_size);
+  std::vector<unsigned int> global_block_ids(total_size);
   // Gather all block IDs at root
   mpi_comm.all_gather(local_block_ids, global_block_ids, all_sizes, displs);
 
   // Create a union of all unique block IDs
-  std::set<int> global_unique_block_ids(global_block_ids.begin(), global_block_ids.end());
+  std::set<unsigned int> global_unique_block_ids(global_block_ids.begin(), global_block_ids.end());
 
   // Assign unique block IDs for global reduction
   global_block_ids.assign(global_unique_block_ids.begin(), global_unique_block_ids.end());
@@ -805,7 +903,7 @@ MeshContinuum::ComputeVolumePerBlockID() const
 
   // Fill local volumes vector based on the local block volumes
   // and perform the reduction one block at a time
-  std::map<int, double> global_block_volumes;
+  std::map<unsigned int, double> global_block_volumes;
   for (size_t i = 0; i < global_block_ids.size(); ++i)
   {
     if (block_volumes.find(global_block_ids[i]) != block_volumes.end())

@@ -5,6 +5,7 @@
 
 import os
 import sys
+import numpy as np
 
 if "opensn_console" not in globals():
     from mpi4py import MPI
@@ -77,7 +78,6 @@ if __name__ == "__main__":
         },
     ]
     solver_dict["xs_map"] = xs_map
-    solver_dict["scattering_order"] = 0
     solver_dict["volumetric_sources"] = [src0, src1]
     solver_dict["boundary_conditions"] = [
         {"name": "zmin", "type": "vacuum"},
@@ -87,31 +87,34 @@ if __name__ == "__main__":
         "save_angular_flux": True,
     }
 
+    # Initialize and execute solvers
     phys1 = DiscreteOrdinatesProblem(**solver_dict)
-
-    # Initialize and execute solver
     ss_solver = SteadyStateSourceSolver(problem=phys1)
     ss_solver.Initialize()
     ss_solver.Execute()
-
-    leakage_left_1 = phys1.ComputeLeakage(["zmin"])["zmin"][0]
-    leakage_right_1 = phys1.ComputeLeakage(["zmax"])["zmax"][0]
+    psi1 = phys1.GetPsi()
     phys1.WriteAngularFluxes("angular_io")
 
     phys2 = DiscreteOrdinatesProblem(**solver_dict)
     ss_solver_2 = SteadyStateSourceSolver(problem=phys2)
     ss_solver_2.Initialize()
     phys2.ReadAngularFluxes("angular_io")
+    psi2 = phys2.GetPsi()
 
-    leakage_left_2 = phys2.ComputeLeakage(["zmin"])["zmin"][0]
-    leakage_right_2 = phys2.ComputeLeakage(["zmax"])["zmax"][0]
+    local_ok = 1
+    for i, (arr1, arr2) in enumerate(zip(psi1, psi2)):
+        if arr1.shape != arr2.shape:
+            local_ok = 0
+            break
+        if not np.allclose(arr1, arr2, rtol=1e-8, atol=1e-12):
+            local_ok = 0
+            break
 
-    leakage_left_diff = leakage_left_1 - leakage_left_2
-    leakage_right_diff = leakage_right_1 - leakage_right_2
+    global_ok = MPIAllReduce(float(local_ok))
+    if global_ok != size:
+        raise ValueError("psi mismatch across ranks")
 
     if rank == 0:
-        print(f"Leakage-Diff1={leakage_left_diff:.5e}")
-    if rank == 0:
-        print(f"Leakage-Diff2={leakage_right_diff:.5e}")
+        print("psi_match = true")
 
     os.remove(f"angular_io{rank}.h5")

@@ -33,7 +33,7 @@ if __name__ == "__main__":
     meshgen = ExtruderMeshGenerator(
         inputs=[
             FromFileMeshGenerator(
-                filename="../../../../assets/mesh/TriangleMesh2x2Cuts.obj"
+                filename="../../../../assets/mesh/triangle_mesh2x2_cuts.obj"
             )
         ],
         layers=[
@@ -50,6 +50,7 @@ if __name__ == "__main__":
         )
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set block IDs using logical volumes
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
@@ -92,7 +93,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_graphite},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {"name": "zmin", "type": "isotropic", "group_strength": bsrc},

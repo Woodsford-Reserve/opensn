@@ -3,14 +3,9 @@
 
 #pragma once
 
+#include "modules/linear_boltzmann_solvers/lbs_problem/device/view/inline_macro.h"
 #include <array>
 #include <cstdint>
-
-#if defined(__NVCC__)
-#define __inline_host_dev__ inline __host__ __device__
-#else
-#define __inline_host_dev__ inline
-#endif
 
 namespace opensn
 {
@@ -76,6 +71,10 @@ struct CellView
     const std::uint64_t* phi_address_data = reinterpret_cast<const std::uint64_t*>(cell_data);
     phi_address = *(phi_address_data++);
     cell_data = reinterpret_cast<const char*>(phi_address_data);
+    // save psi index
+    const std::uint64_t* save_psi_index_data = reinterpret_cast<const std::uint64_t*>(cell_data);
+    save_psi_index = *(save_psi_index_data++);
+    cell_data = reinterpret_cast<const char*>(save_psi_index_data);
     // GM matrix
     GM_data = reinterpret_cast<const double*>(cell_data);
     cell_data = reinterpret_cast<const char*>(GM_data + num_nodes * num_nodes * 4);
@@ -94,6 +93,7 @@ struct CellView
   double density;
   const double* total_xs;
   std::uint64_t phi_address;
+  std::uint64_t save_psi_index;
   const double* GM_data;
   const std::uint64_t* offset_face_data;
   const char* face_data;

@@ -8,6 +8,7 @@
 #include "framework/object_factory.h"
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
+#include <stdexcept>
 
 namespace opensn
 {
@@ -62,6 +63,12 @@ NonLinearKEigenSolver::NonLinearKEigenSolver(const InputParameters& params)
 {
   auto& tolerances = nl_solver_.GetToleranceOptions();
 
+  if (do_problem_->IsTimeDependent())
+  {
+    throw std::runtime_error(
+      "NonLinearKEigenSolver cannot be used with a time-dependent DiscreteOrdinatesProblem.");
+  }
+
   tolerances.nl_abs_tol = params.GetParamValue<double>("nl_abs_tol");
   tolerances.nl_rel_tol = params.GetParamValue<double>("nl_rel_tol");
   tolerances.nl_sol_tol = params.GetParamValue<double>("nl_sol_tol");
@@ -104,6 +111,11 @@ NonLinearKEigenSolver::Execute()
   }
 
   do_problem_->UpdateFieldFunctions();
+  if (IsBalanceEnabled())
+  {
+    ComputeBalance(*do_problem_, 1.0 / nl_context_->kresid_func_context.k_eff);
+    log.Log() << "Balance table uses k-eigenvalue normalization (production scaled by 1/k_eff)";
+  }
 
   log.Log() << "LinearBoltzmann::NonLinearKEigenvalueSolver execution completed\n\n";
 }

@@ -10,6 +10,7 @@
 #include "framework/runtime.h"
 #include "framework/object_factory.h"
 #include <memory>
+#include <limits>
 
 namespace opensn
 {
@@ -44,6 +45,11 @@ VolumetricSource::GetInputParameters()
     "func",
     std::shared_ptr<VectorSpatialFunction>{},
     "SpatialMaterialFunction object to be used to define the source.");
+  params.AddOptionalParameter("start_time",
+                              -std::numeric_limits<double>::infinity(),
+                              "Time at which the source becomes active.");
+  params.AddOptionalParameter(
+    "end_time", std::numeric_limits<double>::infinity(), "Time at which the source is inactive.");
 
   return params;
 }
@@ -57,10 +63,12 @@ VolumetricSource::Create(const ParameterBlock& params)
 
 VolumetricSource::VolumetricSource(const InputParameters& params)
   : id_(next_id_++),
-    block_ids_(params.GetParamVectorValue<int>("block_ids")),
+    block_ids_(params.GetParamVectorValue<unsigned int>("block_ids")),
     logvol_(params.GetSharedPtrParam<LogicalVolume>("logical_volume", false)),
     strength_(params.GetParamVectorValue<double>("group_strength")),
-    function_(params.GetSharedPtrParam<VectorSpatialFunction>("func", false))
+    function_(params.GetSharedPtrParam<VectorSpatialFunction>("func", false)),
+    start_time_(params.GetParamValue<double>("start_time")),
+    end_time_(params.GetParamValue<double>("end_time"))
 {
   if (not logvol_ and block_ids_.empty())
     throw std::invalid_argument("A volumetric source must be defined with a logical volume, "
@@ -86,7 +94,7 @@ VolumetricSource::Initialize(const LBSProblem& lbs_problem)
   subscribers_.clear();
   if (logvol_ and block_ids_.empty())
   {
-    std::set<int> blk_ids;
+    std::set<unsigned int> blk_ids;
     for (const auto& cell : lbs_problem.GetGrid()->local_cells)
       if (logvol_->Inside(cell.centroid))
       {
@@ -123,11 +131,17 @@ VolumetricSource::operator()(const Cell& cell,
                              const std::size_t num_groups) const
 {
   if (std::count(subscribers_.begin(), subscribers_.end(), cell.local_id) == 0)
-    return std::vector<double>(num_groups, 0.0);
+    return std::vector<double>(num_groups, 0.0); // NOLINT
   else if (not function_)
     return strength_;
   else
     return (*function_)(xyz, num_groups);
+}
+
+bool
+VolumetricSource::IsActive(double time) const
+{
+  return time >= start_time_ && time <= end_time_;
 }
 
 } // namespace opensn

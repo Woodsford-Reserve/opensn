@@ -22,7 +22,7 @@ CBC_SPDS::CBC_SPDS(const Vector3& omega,
   size_t num_loc_cells = grid->local_cells.size();
 
   // Populate Cell Relationships
-  std::vector<std::set<std::pair<int, double>>> cell_successors(num_loc_cells);
+  std::vector<std::set<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
   std::set<int> location_successors;
   std::set<int> location_dependencies;
 
@@ -75,7 +75,7 @@ CBC_SPDS::CBC_SPDS(const Vector3& omega,
   {
     const size_t num_faces = cell.faces.size();
     unsigned int num_dependencies = 0;
-    std::vector<uint64_t> succesors;
+    std::vector<std::uint32_t> successors;
 
     for (size_t f = 0; f < num_faces; ++f)
     {
@@ -88,11 +88,11 @@ CBC_SPDS::CBC_SPDS(const Vector3& omega,
       {
         const auto& face = cell.faces[f];
         if (face.has_neighbor and grid->IsCellLocal(face.neighbor_id))
-          succesors.push_back(grid->cells[face.neighbor_id].local_id);
+          successors.push_back(grid->cells[face.neighbor_id].local_id);
       }
     }
 
-    task_list_.push_back({num_dependencies, succesors, cell.local_id, &cell, false});
+    task_list_.push_back({num_dependencies, successors, cell.local_id, &cell, false});
   }
 }
 

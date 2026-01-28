@@ -78,7 +78,7 @@
   },
   {
     "file": "transport_2d_2_unstructured.py",
-    "comment": "2D LinearBSolver Test Unstructured grid - PWLD",
+    "comment": "2D unstructured grid, PWLD",
     "num_procs": 4,
     "checks": [
       {
@@ -91,6 +91,25 @@
         "type": "KeyValuePair",
         "key": "Max-value2=",
         "goldvalue": 0.00142458,
+        "abs_tol": 0.0001
+      }
+    ]
+  },
+  {
+    "file": "transport_2d_2_unstructured_sldfe.py",
+    "comment": "2D unstructured grid, PWLD, SLDFEsq quadrature",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.50985,
+        "abs_tol": 0.0001
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value2=",
+        "goldvalue": 0.00146633,
         "abs_tol": 0.0001
       }
     ]
@@ -307,7 +326,7 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 1083.08571,
+        "goldvalue": 1083.08555,
         "abs_tol": 0.0001
       }
     ]
@@ -320,7 +339,7 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 1083.08571,
+        "goldvalue": 1083.08555,
         "abs_tol": 0.0001
       }
     ]
@@ -410,14 +429,26 @@
         "type": "FloatCompare",
         "key": "WGS groups [0-62] Iteration    53",
         "wordnum": 8,
-        "gold": 7.39959e-07,
+        "gold": 7.78662e-07,
         "abs_tol": 1e-09
       },
       {
         "type": "FloatCompare",
         "key": "WGS groups [63-167] Iteration    60",
         "wordnum": 8,
-        "gold": 4.74878e-07,
+        "gold": 4.83429e-07,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.14473,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.14473,
         "abs_tol": 1e-09
       }
     ]
@@ -443,14 +474,26 @@
         "type": "FloatCompare",
         "key": "WGS groups [0-62] Iteration    54",
         "wordnum": 8,
-        "gold": 5.70363e-07,
+        "gold": 6.24484e-07,
         "abs_tol": 1e-09
       },
       {
         "type": "FloatCompare",
         "key": "WGS groups [63-167] Iteration    58",
         "wordnum": 8,
-        "gold": 5.98697e-07,
+        "gold": 6.25993e-07,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.16196,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.16196,
         "abs_tol": 1e-09
       }
     ]
@@ -509,6 +552,25 @@
         "type": "KeyValuePair",
         "key": "Max-value2=",
         "goldvalue": 0.000804576,
+        "abs_tol": 0.0001
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_1b_exodus.py",
+    "comment": "3D LinearBSolver Test - PWLD - apply BCs on a mesh read from an exodusII file",
+    "num_procs": 2,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 5.52528e-1,
+        "abs_tol": 0.0001
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value2=",
+        "goldvalue": 4.59362e-04,
         "abs_tol": 0.0001
       }
     ]
@@ -660,7 +722,7 @@
       },
       {
         "type": "StrCompare",
-        "key": "WGS groups [63-167] Iteration    64",
+        "key": "WGS groups [63-167] Iteration    57",
         "wordnum": 9,
         "gold": "CONVERGED"
       },
@@ -668,14 +730,26 @@
         "type": "FloatCompare",
         "key": "WGS groups [0-62] Iteration    54",
         "wordnum": 8,
-        "gold": 9.78553e-07,
+        "gold": 5.47188e-07,
         "abs_tol": 1e-09
       },
       {
         "type": "FloatCompare",
-        "key": "WGS groups [63-167] Iteration    64",
+        "key": "WGS groups [63-167] Iteration    57",
         "wordnum": 8,
-        "gold": 9.40056e-07,
+        "gold": 6.98369e-07,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.09495,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 0.09495,
         "abs_tol": 1e-09
       }
     ]
@@ -695,6 +769,26 @@
         "type": "KeyValuePair",
         "key": "Max-value2=",
         "goldvalue": 0.000374343,
+        "abs_tol": 0.0001
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_4_cycles_1_gpu.py",
+    "comment": "3D LinearBSolver Test Extruded-Unstructured Mesh - PWLD",
+    "requires_gpu": "True",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value1=",
+        "goldvalue": 5.55349e-01,
+        "abs_tol": 0.0001
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value2=",
+        "goldvalue": 4.08422e-10,
         "abs_tol": 0.0001
       }
     ]
@@ -1024,13 +1118,13 @@
       {
         "type": "KeyValuePair",
         "key": " Absorption rate             =",
-        "goldvalue": 0.324502,
+        "goldvalue": 0.3245019,
         "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": " Out-flow rate               =",
-        "goldvalue": 13.43580,
+        "goldvalue": 13.43587,
         "abs_tol": 1e-06
       }
     ]
@@ -1041,16 +1135,10 @@
     "num_procs": 4,
     "checks": [
       {
-        "type": "KeyValuePair",
-        "key": "Leakage-Diff1=",
-        "goldvalue": 0.0,
-        "abs_tol": 0.0001
-      },
-      {
-        "type": "KeyValuePair",
-        "key": "Leakage-Diff2=",
-        "goldvalue": 0.0,
-        "abs_tol": 0.0001
+        "type": "StrCompare",
+        "key": "psi_match = ",
+        "wordnum": 3,
+        "gold": "true"
       }
     ]
   },
@@ -1061,7 +1149,7 @@
     "checks": [
       {
         "type": "StrCompare",
-        "key": "**** ERROR ****  Invalid param",
+        "key": "Invalid param ",
         "wordnum": 6,
         "gold": "\"wrong-parameter\""
       }
@@ -1079,7 +1167,7 @@
         "gold": "\"max_mpi_message_size\"."
       }
     ]
-  },  
+  },
   {
     "file": "transport_3d_7a_leb_quad.py",
     "comment": "3d Simple Homogenous System - 3D Ortho Mesh + Lebedev Quadrature (3) + 0.5 Scattering Ratio",
@@ -1115,6 +1203,126 @@
         "key": "Max-value2=",
         "goldvalue": 1.57353e+00,
         "abs_tol": 0.0001
+      }
+    ]
+  },
+  {
+    "file": "transport_2d_gmsh_blk_bnds_v2.py",
+    "comment": "Test that blocks and boundaries can be used when reading a gmsh mesh file (v2)",
+    "num_procs": 1,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Sum=",
+        "goldvalue": 0.14766,
+        "abs_tol": 0.00001
+      }
+    ]
+  },
+  {
+    "file": "transport_2d_gmsh_blk_bnds_v4.py",
+    "comment": "Test that blocks and boundaries can be used when reading a gmsh mesh file (v4)",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Sum=",
+        "goldvalue": 0.14766,
+        "abs_tol": 0.00001
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_uniform_bnd.py",
+    "comment": "Test assignment of a boundary name to all external faces",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Sum=",
+        "goldvalue": 4.10588,
+        "abs_tol": 0.00001
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_disk_leakage_vacuum_bcs.py",
+    "comment": "3D leakage calculation with non-orthogonal boundaries and vacuum bcs",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Top leakage=",
+        "goldvalue": 36.104510,
+        "abs_tol": 1.0e-6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Bottom leakage=",
+        "goldvalue": 36.104355,
+        "abs_tol": 1.0e-6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Side leakage=",
+        "goldvalue": 39.754077,
+        "abs_tol": 1.0e-6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Total leakage=",
+        "goldvalue": 111.962942,
+        "abs_tol": 1.0e-6
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_disk_leakage_reflecting_bcs.py",
+    "comment": "3D leakage calculation with non-orthogonal boundaries and reflecting/vacuum bcs",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Top leakage=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-13
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Bottom leakage=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-13
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Side leakage=",
+        "goldvalue": 97.14824832,
+        "abs_tol": 1e-6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Total leakage=",
+        "goldvalue": 97.14824832,
+        "abs_tol": 1e-6
+      }
+    ]
+  },
+  {
+    "file": "transport_2d_ortho_arbitrary_bc.py",
+    "comment": "2D orthogonal arbitrary boundary condition",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Bottom leakage = ",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-12
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Top + Right leakage = ",
+        "goldvalue": 1.0,
+        "abs_tol": 1e-8
       }
     ]
   }

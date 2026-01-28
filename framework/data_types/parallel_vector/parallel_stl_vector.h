@@ -163,14 +163,16 @@ protected:
 
   std::vector<double> values_;
 
-  using Operation = std::pair<int64_t, double>;
+  using Operation = std::pair<uint64_t, double>;
   std::vector<Operation> set_cache_;
   std::vector<Operation> add_cache_;
 
 private:
+  int FindOwnerPID(uint64_t global_id) const;
+
+private:
   static std::vector<uint64_t>
   DefineExtents(uint64_t local_size, int comm_size, const mpi::Communicator& communicator);
-  int FindOwnerPID(uint64_t global_id) const;
 };
 
 } // namespace opensn

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
+use_color=0
 user_extra_before=""
 user_extra_arg=""
 positional=()
 before_opt=()
 arg_opt=()
+clang_tidy_args=()
 had_issues=0
 tmp_log="$(mktemp -t clang_tidy.XXXXXX)"
 cleanup() { rm -f "$tmp_log"; }
@@ -13,24 +15,26 @@ trap cleanup EXIT
 set -Eeuo pipefail
 
 usage() {
-  cat <<EOF
-Usage: run-clang-tidy.sh [-h] [FILENAME]
+  cat <<'EOF'
+Usage: run-clang-tidy.sh [-h] [-use-color] [-extra-arg-before=ARG] [-extra-arg=ARG] [FILENAME]
 
 OpenSn-specific clang-tidy script.
 
-Runs clang-tidy on the entire OpenSn repository or on a single source file.
+Runs `run-clang-tidy` on the framework, modules, and python sources; you can specify a single
+source file instead of running on the entire repository.
 
-This command should be run from the root of the OpenSn repository.
+Examples (run from repository root):
+  Analyze everything:
+    tools/developer/run-clang-tidy.sh
 
-For example, to analyze the entire repository, run:
-tools/developer/run-clang-tidy.sh
-
-To analyze a single source (.cc) file, run:
-tools/developer/run-clang-tidy.sh framework/utils/timer.cc:
+  Analyze one file:
+    tools/developer/run-clang-tidy.sh framework/utils/timer.cc
 
 Options:
-  -h, --help    Show this help and exit.
-
+  -h, --help               Show this help text and exit.
+  -use-color, --use-color  Enable colored output when supported.
+  -extra-arg-before=ARG    Forward ARG before the file list (passed verbatim to llvm's run-clang-tidy).
+  -extra-arg=ARG           Forward ARG after the file list.
 EOF
 }
 
@@ -46,11 +50,18 @@ while [[ $# -gt 0 ]]; do
       user_extra_arg="${1#*=}"; shift; continue ;;
     -extra-arg)
       shift; user_extra_arg="${1:-}"; [[ -n "${1:-}" ]] && shift; continue ;;
+    -use-color|--use-color)
+      use_color=1; shift; continue ;;
     --) shift; break ;;
     -*) echo "Unknown option: $1" >&2; usage; exit 2 ;;
     *) positional+=( "$1" ); shift; continue ;;
   esac
 done
+
+# Add color flag if requested
+if (( use_color )); then
+  clang_tidy_args+=( -use-color )
+fi
 
 # Collect anything after '--'
 if [[ $# -gt 0 ]]; then positional+=( "$@" ); fi
@@ -87,10 +98,10 @@ if (( ${#positional[@]} == 1 )); then
       exit 1
     fi
   fi
-  run-clang-tidy -p build -header-filter="$header_filter" ${before_opt[@]+"${before_opt[@]}"} \
+  run-clang-tidy ${clang_tidy_args[@]:-} -p build -header-filter="$header_filter" ${before_opt[@]+"${before_opt[@]}"} \
                  ${arg_opt[@]+"${arg_opt[@]}"} "$file" -warnings-as-errors='*' | tee -a "$tmp_log"
 else
-  run-clang-tidy -p build -header-filter="$header_filter" ${before_opt[@]+"${before_opt[@]}"} \
+  run-clang-tidy ${clang_tidy_args[@]:-} -p build -header-filter="$header_filter" ${before_opt[@]+"${before_opt[@]}"} \
                  ${arg_opt[@]+"${arg_opt[@]}"} "${repo}/framework" "${repo}/modules" "${repo}/python" \
                  -warnings-as-errors='*' | tee -a "$tmp_log"
 fi

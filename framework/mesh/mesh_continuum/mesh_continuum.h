@@ -8,6 +8,7 @@
 #include "framework/mesh/mesh_continuum/mesh_continuum_local_cell_handler.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum_global_cell_handler.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum_vertex_handler.h"
+#include "framework/math/geometry.h"
 #include <memory>
 #include <array>
 
@@ -33,6 +34,8 @@ public:
   CoordinateSystemType GetCoordinateSystem() const { return coord_sys_; }
   void SetCoordinateSystem(const CoordinateSystemType coord_sys) { coord_sys_ = coord_sys; }
 
+  GeometryType GetGeometryType() const;
+
   bool Extruded() const { return extruded_; }
   void SetExtruded(const bool extruded) { extruded_ = extruded; }
 
@@ -44,6 +47,9 @@ public:
   uint64_t GetGlobalVertexCount() const { return global_vertex_count_; }
   int GetNumPartitions() const { return num_partitions_; }
   size_t GetGlobalNumberOfCells() const;
+
+  std::map<std::string, uint64_t>& GetBoundaryNameMap() { return boundary_name_map_; }
+  const std::map<std::string, uint64_t>& GetBoundaryNameMap() const { return boundary_name_map_; }
 
   std::map<uint64_t, std::string>& GetBoundaryIDMap() { return boundary_id_map_; }
   const std::map<uint64_t, std::string>& GetBoundaryIDMap() const { return boundary_id_map_; }
@@ -122,10 +128,13 @@ public:
   std::pair<Vector3, Vector3> GetLocalBoundingBox() const;
 
   /// Sets block ids for all cells to the specified block id.
-  void SetUniformBlockID(int blk_id);
+  void SetUniformBlockID(unsigned int blk_id);
 
   /// Sets block IDs using a logical volume.
-  void SetBlockIDFromLogicalVolume(const LogicalVolume& log_vol, int blk_id, bool sense);
+  void SetBlockIDFromLogicalVolume(const LogicalVolume& log_vol, unsigned int blk_id, bool sense);
+
+  /// Assign all boundary faces to a single name
+  void SetUniformBoundaryID(const std::string& boundary_name);
 
   /// Sets boundary ids using a logical volume.
   void SetBoundaryIDFromLogicalVolume(const LogicalVolume& log_vol,
@@ -148,12 +157,12 @@ public:
    */
   std::shared_ptr<MPICommunicatorSet> MakeMPILocalCommunicatorSet() const;
 
+  /// Compute volume per block IDs
+  std::map<unsigned int, double> ComputeVolumePerBlockID() const;
+
   VertexHandler vertices;
   LocalCellHandler local_cells;
   GlobalCellHandler cells;
-
-  /// Compute volume per block IDs
-  std::map<int, double> ComputeVolumePerBlockID() const;
 
 private:
   /// Spatial dimension
@@ -163,6 +172,7 @@ private:
   bool extruded_;
   OrthoMeshAttributes ortho_attributes_;
   std::map<uint64_t, std::string> boundary_id_map_;
+  std::map<std::string, uint64_t> boundary_name_map_;
   int num_partitions_;
   uint64_t global_vertex_count_;
 

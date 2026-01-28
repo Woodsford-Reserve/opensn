@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2024 The OpenSn Authors <https://open-sn.github.io/opensn/>
 // SPDX-License-Identifier: MIT
 
+#include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/snes_k_monitor.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/snes_k_residual_func_context.h"
 #include "framework/runtime.h"
 #include "framework/logging/log.h"
@@ -14,7 +15,7 @@ namespace opensn
 PetscErrorCode
 KEigenSNESMonitor(SNES /*unused*/, PetscInt iter, PetscReal rnorm, void* ctx)
 {
-  auto& residual_context = *(KResidualFunctionContext*)ctx;
+  auto& residual_context = *static_cast<KResidualFunctionContext*>(ctx);
 
   double k_eff = residual_context.k_eff;
   double reactivity = (k_eff - 1.0) / k_eff;
@@ -34,7 +35,7 @@ KEigenSNESMonitor(SNES /*unused*/, PetscInt iter, PetscReal rnorm, void* ctx)
 PetscErrorCode
 KEigenKSPMonitor(KSP ksp, PetscInt iter, PetscReal rnorm, void* ctx)
 {
-  auto& residual_context = *(KResidualFunctionContext*)ctx;
+  auto& residual_context = *static_cast<KResidualFunctionContext*>(ctx);
 
   std::stringstream iter_info;
   iter_info << "      " << program_timer.GetTimeString() << " " << residual_context.solver_name

@@ -33,7 +33,7 @@ if __name__ == "__main__":
     meshgen = ExtruderMeshGenerator(
         inputs=[
             FromFileMeshGenerator(
-                filename="../../../../assets/mesh/SquareMesh2x2Quads.obj"
+                filename="../../../../assets/mesh/square_mesh2x2_quads.obj"
             )
         ],
         layers=[{"z": 0.4, "n": 2},
@@ -93,7 +93,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_graphite},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src0, mg_src1],
     )
     ss_solver = SteadyStateSourceSolver(problem=phys)

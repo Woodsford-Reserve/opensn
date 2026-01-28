@@ -9,40 +9,56 @@
 namespace opensn
 {
 class CellMapping;
+class DiscreteOrdinatesProblem;
 
+/**
+ * Implements the core sweep operation for a single cell within the
+ *        cell-by-cell (CBC) sweep algorithm
+ *
+ * This class is responsible for performing the discrete ordinates transport
+ * calculation on a given cell for all angles and groups managed by its
+ * current AngleSet
+ * It interacts with a CBC_FLUDS object to obtain upwind angular flux data
+ * (from local neighbors, MPI remote buffers, or boundaries) and to store
+ * outgoing angular flux data (to local neighbors or MPI send buffers)
+ */
 class CBCSweepChunk : public SweepChunk
 {
 public:
-  CBCSweepChunk(std::vector<double>& destination_phi,
-                std::vector<double>& destination_psi,
-                const std::shared_ptr<MeshContinuum>& grid,
-                const SpatialDiscretization& discretization,
-                const std::vector<UnitCellMatrices>& unit_cell_matrices,
-                std::vector<CellLBSView>& cell_transport_views,
-                const std::vector<double>& densities,
-                const std::vector<double>& source_moments,
-                const LBSGroupset& groupset,
-                const std::map<int, std::shared_ptr<MultiGroupXS>>& xs,
-                int num_moments,
-                int max_num_cell_dofs,
-                int min_num_cell_dofs);
+  CBCSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& groupset);
 
   void SetAngleSet(AngleSet& angle_set) override;
 
   void SetCell(Cell const* cell_ptr, AngleSet& angle_set) override;
 
+  /**
+   * Performs the discrete ordinates sweep calculation for the currently
+   *        set cell, for all angles and groups within the provided AngleSet
+   *
+   * It:
+   * - Assembles the local transport equation system for each angle and group
+   * - Retrieves upwind angular fluxes from local neighbors, remote locations
+   *   (via MPI data managed by CBC_FLUDS), or boundaries
+   * - Solves the local system for the outgoing angular fluxes at the cell nodes
+   * - Updates the global scalar flux moments
+   * - If save_angular_flux_ is true, stores the computed angular fluxes into
+   *   the global angular flux vector
+   * - Propagates outgoing angular fluxes to local downwind neighbors or stages
+   *   them for MPI transmission to remote downwind neighbors
+   */
   void Sweep(AngleSet& angle_set) override;
 
 private:
   CBC_FLUDS* fluds_;
   size_t gs_size_;
-  int gs_gi_;
-  size_t group_stride_;
-  size_t group_angle_stride_;
+  unsigned int gs_gi_;
+  size_t num_angles_in_as_;
+  size_t group_stride_;       // Stride for consecutive angles
+  size_t group_angle_stride_; // Stride for consecutive spatial DOFs
   bool surface_source_active_;
 
   const Cell* cell_;
-  uint64_t cell_local_id_;
+  std::uint32_t cell_local_id_;
   const CellMapping* cell_mapping_;
   CellLBSView* cell_transport_view_;
   size_t cell_num_faces_;

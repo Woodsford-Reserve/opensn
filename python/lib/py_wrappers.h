@@ -117,17 +117,17 @@ extract_args_tuple(py::kwargs& kwargs,
 }
 
 /**
- *  @brief Construct an object from kwargs
- *  @details This function template allows construction of a C++ object from Python keyword
+ *  \brief Construct an object from kwargs
+ *  \details This function template allows construction of a C++ object from Python keyword
  *  arguments (`py::kwargs`), with enforcement of required and optional arguments.
- *  @tparam T The target class type to construct.
- *  @tparam Args The constructor argument types of T.
- *  @param kwargs Python keyword arguments provided from a Pybind11 binding.
- *  @param required_keys List of required argument names (must appear in ``kwargs``).
- *  @param optional_keys List of optional arguments with default values (used if not found in
+ *  \tparam T The target class type to construct.
+ *  \tparam Args The constructor argument types of T.
+ *  \param kwargs Python keyword arguments provided from a Pybind11 binding.
+ *  \param required_keys List of required argument names (must appear in ``kwargs``).
+ *  \param optional_keys List of optional arguments with default values (used if not found in
  *  ``kwargs``).
- *  @note This function is meant to replace the functionality of ``InputParameters``.
- *  @example
+ *  \note This function is meant to replace the functionality of ``InputParameters``.
+ *  \example
  *  // C++ class
  *  class Foo {
  *    public:
@@ -187,7 +187,7 @@ void WrapQuadraturePointPhiTheta(py::module& aquad);
 void WrapQuadrature(py::module& aquad);
 void WrapProductQuadrature(py::module& aquad);
 void WrapCurvilinearProductQuadrature(py::module& aquad);
-void WrapSLDFESQuadrature(py::module& aquad);
+void WrapSLDFEsqQuadrature(py::module& aquad);
 void WrapLebedevQuadrature(py::module& aquad);
 
 /// Wrap the field function components of OpenSn.
@@ -225,6 +225,7 @@ void WrapProblem(py::module& slv);
 void WrapSolver(py::module& slv);
 void WrapLBS(py::module& slv);
 void WrapSteadyState(py::module& slv);
+void WrapTimeDependent(py::module& slv);
 void WrapNLKEigen(py::module& slv);
 void WrapPIteration(py::module& slv);
 void WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv);

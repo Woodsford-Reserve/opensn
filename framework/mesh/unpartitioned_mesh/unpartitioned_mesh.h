@@ -32,7 +32,7 @@ public:
     const CellType type;
     const CellType sub_type;
     Vector3 centroid;
-    int block_id = -1;
+    unsigned int block_id = std::numeric_limits<unsigned int>::max();
     std::vector<uint64_t> vertex_ids;
     std::vector<LightWeightFace> faces;
 
@@ -76,6 +76,9 @@ public:
 
   const std::map<uint64_t, std::string>& GetBoundaryIDMap() const { return boundary_id_map_; }
   std::map<uint64_t, std::string>& GetBoundaryIDMap() { return boundary_id_map_; }
+
+  const std::map<std::string, uint64_t>& GetBoundaryNameMap() const { return boundary_name_map_; }
+  std::map<std::string, uint64_t>& GetBoundaryNameMap() { return boundary_name_map_; }
 
   const std::vector<std::set<uint64_t>>& GetVertextCellSubscriptions() const
   {
@@ -124,6 +127,7 @@ protected:
   Options mesh_options_;
   BoundBox bound_box_;
   std::map<uint64_t, std::string> boundary_id_map_;
+  std::map<std::string, uint64_t> boundary_name_map_;
 
   std::vector<Vector3> vertices_;
   std::vector<std::shared_ptr<LightWeightCell>> raw_cells_;

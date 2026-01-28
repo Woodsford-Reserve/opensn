@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     # Setup mesh using an unstructured triangle mesh file
     meshgen = FromFileMeshGenerator(
-        filename="../../../../assets/mesh/TriangleMesh2x2Cuts.obj",
+        filename="../../../../assets/mesh/triangle_mesh2x2_cuts.obj",
         partitioner=KBAGraphPartitioner(
             nx=2,
             ny=2,
@@ -42,6 +42,7 @@ if __name__ == "__main__":
         )
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set block IDs
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
@@ -91,7 +92,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0], "xs": xs_3_170},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {

@@ -86,7 +86,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_3_170},
         ],
-        scattering_order=0,
         volumetric_sources=[mg_src0, mg_src1],
         boundary_conditions=[
             {
@@ -103,11 +102,9 @@ if __name__ == "__main__":
     )
 
     # Initialize and Execute Solver
-    ss_solver = SteadyStateSourceSolver(problem=phys)
+    ss_solver = SteadyStateSourceSolver(problem=phys, compute_balance=True)
     ss_solver.Initialize()
     ss_solver.Execute()
-
-    phys.ComputeBalance()
 
     # Get field functions
     fflist = phys.GetScalarFieldFunctionList()

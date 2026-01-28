@@ -61,14 +61,9 @@ ProductQuadrature::AssembleCosines(const std::vector<double>& azimuthal,
 
       if (verbose)
       {
-        char buf[200];
-        snprintf(buf,
-                 200,
-                 "Varphi=%.2f Theta=%.2f Weight=%.3e\n",
-                 abscissa.phi * 180.0 / M_PI,
-                 abscissa.theta * 180.0 / M_PI,
-                 weight);
-        ostr << buf;
+        ostr << "Varphi=" << std::fixed << std::setprecision(2) << abscissa.phi * 180.0 / M_PI
+             << " Theta=" << std::fixed << std::setprecision(2) << abscissa.theta * 180.0 / M_PI
+             << " Weight=" << std::scientific << std::setprecision(3) << weight << '\n';
       }
     }
   }
@@ -98,7 +93,9 @@ ProductQuadrature::AssembleCosines(const std::vector<double>& azimuthal,
     weight_sum_ += w;
 }
 
-GLProductQuadrature1DSlab::GLProductQuadrature1DSlab(int Npolar, int scattering_order, bool verbose)
+GLProductQuadrature1DSlab::GLProductQuadrature1DSlab(unsigned int Npolar,
+                                                     unsigned int scattering_order,
+                                                     bool verbose)
   : ProductQuadrature(1, scattering_order)
 {
   if (Npolar % 2 != 0)
@@ -112,7 +109,7 @@ GLProductQuadrature1DSlab::GLProductQuadrature1DSlab(int Npolar, int scattering_
 
   // Create polar angles
   polar_ang.clear();
-  for (auto j = 0; j < Npolar; ++j)
+  for (unsigned int j = 0; j < Npolar; ++j)
     polar_ang.emplace_back(M_PI - acos(gl_polar.qpoints[j][0]));
 
   // Create combined weights
@@ -129,9 +126,9 @@ GLProductQuadrature1DSlab::GLProductQuadrature1DSlab(int Npolar, int scattering_
             << std::endl;
 }
 
-GLCProductQuadrature2DXY::GLCProductQuadrature2DXY(int Npolar,
-                                                   int Nazimuthal,
-                                                   int scattering_order,
+GLCProductQuadrature2DXY::GLCProductQuadrature2DXY(unsigned int Npolar,
+                                                   unsigned int Nazimuthal,
+                                                   unsigned int scattering_order,
                                                    bool verbose)
   : ProductQuadrature(2, scattering_order)
 {
@@ -146,13 +143,13 @@ GLCProductQuadrature2DXY::GLCProductQuadrature2DXY(int Npolar,
 
   // Create azimuthal angles
   azimu_ang.clear();
-  for (auto i = 0; i < Nazimuthal; ++i)
+  for (unsigned int i = 0; i < Nazimuthal; ++i)
     azimu_ang.emplace_back(M_PI * (2 * (i + 1) - 1) / Nazimuthal);
 
-  // Create polar angles (only take the half of the GL nodes < M_PI/2)
-  const int half = Npolar / 2;
+  // Create polar angles (keep the positive polar cosines)
+  const unsigned int half = Npolar / 2;
   polar_ang.resize(half);
-  for (int j = 0; j < half; ++j)
+  for (unsigned int j = 0; j < half; ++j)
     polar_ang[j] = M_PI - std::acos(gl_polar.qpoints[j][0]);
 
   // Create combined weights
@@ -172,9 +169,9 @@ GLCProductQuadrature2DXY::GLCProductQuadrature2DXY(int Npolar,
             << std::endl;
 }
 
-GLCProductQuadrature3DXYZ::GLCProductQuadrature3DXYZ(int Npolar,
-                                                     int Nazimuthal,
-                                                     int scattering_order,
+GLCProductQuadrature3DXYZ::GLCProductQuadrature3DXYZ(unsigned int Npolar,
+                                                     unsigned int Nazimuthal,
+                                                     unsigned int scattering_order,
                                                      bool verbose)
   : ProductQuadrature(3, scattering_order)
 {
@@ -189,12 +186,12 @@ GLCProductQuadrature3DXYZ::GLCProductQuadrature3DXYZ(int Npolar,
 
   // Create azimuthal angles
   azimu_ang.clear();
-  for (auto i = 0; i < Nazimuthal; ++i)
+  for (unsigned int i = 0; i < Nazimuthal; ++i)
     azimu_ang.emplace_back(M_PI * (2 * (i + 1) - 1) / Nazimuthal);
 
   // Create polar angles
   polar_ang.clear();
-  for (auto j = 0; j < Npolar; ++j)
+  for (unsigned int j = 0; j < Npolar; ++j)
     polar_ang.emplace_back(M_PI - acos(gl_polar.qpoints[j][0]));
 
   // Create combined weights

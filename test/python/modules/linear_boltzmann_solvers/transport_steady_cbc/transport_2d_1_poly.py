@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     # Setup mesh
     meshgen = FromFileMeshGenerator(
-        filename="../../../../assets/mesh/SquareMesh2x2QuadsBlock.obj",
+        filename="../../../../assets/mesh/square_mesh2x2_quads_block.obj",
         partitioner=KBAGraphPartitioner(
             nx=2,
             ny=2,
@@ -42,6 +42,7 @@ if __name__ == "__main__":
         )
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Cross-section data
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
@@ -96,14 +97,12 @@ if __name__ == "__main__":
                 "xs": xs_3_170
             }
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {"name": "xmin", "type": "isotropic", "group_strength": bsrc},
         ],
         options={
-            "max_ags_iterations": 1,
-            "save_angular_flux": True
+            "max_ags_iterations": 1
         },
         sweep_type="CBC"
     )

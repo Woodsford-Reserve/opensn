@@ -7,7 +7,6 @@
 #include "framework/mesh/mesh.h"
 #include "framework/math/math.h"
 #include <vector>
-#include <limits>
 
 namespace opensn
 {
@@ -15,9 +14,6 @@ namespace opensn
 /// Specified isotropic incident fluxes on a boundary.
 class IsotropicBoundary : public SweepBoundary
 {
-private:
-  std::vector<double> boundary_flux_;
-
 public:
   explicit IsotropicBoundary(size_t num_groups,
                              std::vector<double> boundary_flux,
@@ -27,14 +23,17 @@ public:
   {
   }
 
-  double* PsiIncoming(uint64_t cell_local_id,
+  double* PsiIncoming(std::uint32_t cell_local_id,
                       unsigned int face_num,
                       unsigned int fi,
                       unsigned int angle_num,
-                      int group_num) override
+                      unsigned int group_num) override
   {
     return &boundary_flux_[group_num];
   }
+
+private:
+  std::vector<double> boundary_flux_;
 };
 
 } // namespace opensn

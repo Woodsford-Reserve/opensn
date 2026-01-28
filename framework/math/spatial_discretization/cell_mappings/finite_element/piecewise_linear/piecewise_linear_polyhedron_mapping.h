@@ -41,28 +41,21 @@ public:
   void GradShapeValues(const Vector3& xyz, std::vector<Vector3>& gradshape_values) const override;
 
 private:
-  /// Define standard tetrahedron linear shape functions
-  static double TetShape(int index, const Vector3& qpoint, bool on_surface = false);
-
-  static double TetGradShape_x(int index);
-  static double TetGradShape_y(int index);
-  static double TetGradShape_z(int index);
-
   /// Precomputes the shape function values of a face-side pair at a quadrature point
-  double FaceSideShape(uint32_t face_index,
-                       uint32_t side_index,
-                       uint32_t i,
+  double FaceSideShape(size_t face_index,
+                       size_t side_index,
+                       size_t i,
                        const Vector3& qpoint,
                        bool on_surface = false) const;
 
   /// Precomputes the gradx-shape function values of a face-side pair at a quadrature point
-  double FaceSideGradShape_x(uint32_t face_index, uint32_t side_index, uint32_t i) const;
+  double FaceSideGradShape_x(size_t face_index, size_t side_index, size_t i) const;
 
   /// Precomputes the grady-shape function values of a face-side pair at a quadrature point
-  double FaceSideGradShape_y(uint32_t face_index, uint32_t side_index, uint32_t i) const;
+  double FaceSideGradShape_y(size_t face_index, size_t side_index, size_t i) const;
 
   /// Precomputes the gradz-shape function values of a face-side pair at a quadrature point
-  double FaceSideGradShape_z(uint32_t face_index, uint32_t side_index, uint32_t i) const;
+  double FaceSideGradShape_z(size_t face_index, size_t side_index, size_t i) const;
 
   /// Stores the data for each side's tetrahedron.
   struct FEside_data3d
@@ -118,6 +111,14 @@ private:
 
   const TetrahedraQuadrature& volume_quadrature_;
   const TriangleQuadrature& surface_quadrature_;
+
+private:
+  /// Define standard tetrahedron linear shape functions
+  static double TetShape(int index, const Vector3& qpoint, bool on_surface = false);
+
+  static double TetGradShape_x(int index);
+  static double TetGradShape_y(int index);
+  static double TetGradShape_z(int index);
 };
 
 } // namespace opensn

@@ -4,6 +4,8 @@
 #pragma once
 
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_structs.h"
+#include <map>
+#include <memory>
 #include <vector>
 
 namespace opensn
@@ -14,21 +16,11 @@ class MeshContinuum;
 /// Base class for sweep related boundaries.
 class SweepBoundary
 {
-private:
-  const LBSBoundaryType type_;
-  const CoordinateSystemType coord_type_;
-  /// Time value passed to boundary functions
-  double evaluation_time_ = 0.0;
-
-protected:
-  std::vector<double> zero_boundary_flux_;
-  size_t num_groups_;
-
 public:
   explicit SweepBoundary(LBSBoundaryType bndry_type,
                          size_t num_groups,
                          CoordinateSystemType coord_type)
-    : type_(bndry_type), coord_type_(coord_type), num_groups_(num_groups)
+    : num_groups_(num_groups), type_(bndry_type), coord_type_(coord_type)
   {
     zero_boundary_flux_.resize(num_groups_, 0.0);
   }
@@ -45,12 +37,58 @@ public:
 
   void SetEvaluationTime(double time) { evaluation_time_ = time; }
 
+  virtual bool HasDelayedAngularFlux() const { return false; }
+
+  virtual void InitializeDelayedAngularFlux(const std::shared_ptr<MeshContinuum>& grid,
+                                            const AngularQuadrature& quadrature)
+  {
+  }
+
+  virtual void FinalizeDelayedAngularFluxSetup(
+    uint64_t boundary_id, const std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries)
+  {
+  }
+
+  virtual void ZeroOpposingDelayedAngularFluxOld() {}
+
+  virtual size_t CountDelayedAngularDOFsNew() const { return 0; }
+
+  virtual size_t CountDelayedAngularDOFsOld() const { return 0; }
+
+  virtual void AppendNewDelayedAngularDOFsToVector(std::vector<double>& output) const {}
+
+  virtual void AppendOldDelayedAngularDOFsToVector(std::vector<double>& output) const {}
+
+  virtual void AppendNewDelayedAngularDOFsToArray(int64_t& index, double* buffer) const {}
+
+  virtual void AppendOldDelayedAngularDOFsToArray(int64_t& index, double* buffer) const {}
+
+  virtual void SetNewDelayedAngularDOFsFromArray(int64_t& index, const double* buffer) {}
+
+  virtual void SetOldDelayedAngularDOFsFromArray(int64_t& index, const double* buffer) {}
+
+  virtual void SetNewDelayedAngularDOFsFromVector(const std::vector<double>& values, size_t& index)
+  {
+  }
+
+  virtual void SetOldDelayedAngularDOFsFromVector(const std::vector<double>& values, size_t& index)
+  {
+  }
+
+  virtual void CopyDelayedAngularFluxOldToNew() {}
+
+  virtual void CopyDelayedAngularFluxNewToOld() {}
+
+  virtual void ResetAnglesReadyStatus() {}
+
+  virtual const Vector3* GetNormalForReflection() const { return nullptr; }
+
   /// Returns a pointer to the location of the incoming flux.
-  virtual double* PsiIncoming(uint64_t cell_local_id,
+  virtual double* PsiIncoming(std::uint32_t cell_local_id,
                               unsigned int face_num,
                               unsigned int fi,
                               unsigned int angle_num,
-                              int group_num);
+                              unsigned int group_num);
 
   /// Returns a pointer to the location of the outgoing flux.
   virtual double* PsiOutgoing(uint64_t cell_local_id,
@@ -67,7 +105,17 @@ public:
   {
   }
 
-  double* ZeroFlux(int group_num) { return &zero_boundary_flux_[group_num]; }
+  double* ZeroFlux(unsigned int group_num) { return &zero_boundary_flux_[group_num]; }
+
+protected:
+  std::vector<double> zero_boundary_flux_;
+  size_t num_groups_;
+
+private:
+  const LBSBoundaryType type_;
+  const CoordinateSystemType coord_type_;
+  /// Time value passed to boundary functions
+  double evaluation_time_ = 0.0;
 };
 
 /**

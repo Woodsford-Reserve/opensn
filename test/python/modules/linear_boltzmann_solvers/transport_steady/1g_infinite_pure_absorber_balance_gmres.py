@@ -67,7 +67,6 @@ if __name__ == "__main__":
                 "xs": xs1g
             }
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src],
         boundary_conditions=[
             {"name": "xmin", "type": "reflecting"},
@@ -78,8 +77,6 @@ if __name__ == "__main__":
             {"name": "zmax", "type": "reflecting"},
         ],
     )
-    ss_solver = SteadyStateSourceSolver(problem=phys)
+    ss_solver = SteadyStateSourceSolver(problem=phys, compute_balance=True)
     ss_solver.Initialize()
     ss_solver.Execute()
-
-    phys.ComputeBalance()

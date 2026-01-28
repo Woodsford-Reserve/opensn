@@ -117,7 +117,7 @@ WrapProductQuadrature(py::module& aquad)
       {
         static const std::vector<std::string> required_keys = {"n_polar", "scattering_order"};
         static const std::vector<std::pair<std::string, py::object>> optional_keys = {{"verbose", py::bool_(false)}};
-        return construct_from_kwargs<GLProductQuadrature1DSlab, int, int, bool>(params, required_keys, optional_keys);
+        return construct_from_kwargs<GLProductQuadrature1DSlab, unsigned int, unsigned int, bool>(params, required_keys, optional_keys);
       }
     ),
     R"(
@@ -152,7 +152,7 @@ WrapProductQuadrature(py::module& aquad)
       {
         static const std::vector<std::string> required_keys = {"n_polar", "n_azimuthal", "scattering_order"};
         static const std::vector<std::pair<std::string, py::object>> optional_keys = {{"verbose", py::bool_(false)}};
-        return construct_from_kwargs<GLCProductQuadrature2DXY, int, int, int, bool>(params, required_keys, optional_keys);
+        return construct_from_kwargs<GLCProductQuadrature2DXY, unsigned int, unsigned int, unsigned int, bool>(params, required_keys, optional_keys);
       }
     ),
     R"(
@@ -189,7 +189,7 @@ WrapProductQuadrature(py::module& aquad)
       {
         static const std::vector<std::string> required_keys = {"n_polar", "n_azimuthal", "scattering_order"};
         static const std::vector<std::pair<std::string, py::object>> optional_keys = {{"verbose", py::bool_(false)}};
-        return construct_from_kwargs<GLCProductQuadrature3DXYZ, int, int, int, bool>(params, required_keys, optional_keys);
+        return construct_from_kwargs<GLCProductQuadrature3DXYZ, unsigned int, unsigned int, unsigned int, bool>(params, required_keys, optional_keys);
       }
     ),
     R"(
@@ -246,7 +246,7 @@ WrapCurvilinearProductQuadrature(py::module& aquad)
       {
         static const std::vector<std::string> required_keys = {"n_polar", "n_azimuthal", "scattering_order"};
         static const std::vector<std::pair<std::string, py::object>> optional_keys = {{"verbose", py::bool_(false)}};
-        return construct_from_kwargs<GLCProductQuadrature2DRZ, int, int, int, bool>(params, required_keys, optional_keys);
+        return construct_from_kwargs<GLCProductQuadrature2DRZ, unsigned int, unsigned int, unsigned int, bool>(params, required_keys, optional_keys);
       }
     ),
     R"(
@@ -269,30 +269,28 @@ WrapCurvilinearProductQuadrature(py::module& aquad)
 
 // Wrap SLDFES quadrature
 void
-WrapSLDFESQuadrature(py::module& aquad)
+WrapSLDFEsqQuadrature(py::module& aquad)
 {
   // clang-format off
-  // simplified LDFES quadrature
-  auto simplified_ldfes_quadrature = py::class_<SimplifiedLDFESQ::Quadrature,
-                                                std::shared_ptr<SimplifiedLDFESQ::Quadrature>,
-                                                AngularQuadrature>(
+  // Simplified LDFEsq quadrature
+  auto sldfesq_quadrature_3d_xyz = py::class_<SLDFEsqQuadrature3DXYZ,
+                                              std::shared_ptr<SLDFEsqQuadrature3DXYZ>,
+                                              AngularQuadrature>(
     aquad,
-    "SLDFESQuadrature",
+    "SLDFEsqQuadrature3DXYZ",
     R"(
     Piecewise-linear finite element quadrature using quadrilaterals.
 
-    Wrapper of :cpp:class:`opensn::SimplifiedLDFESQ::Quadrature`.
+    Wrapper of :cpp:class:`opensn::SLDFEsqQuadrature3DXYZ`.
     )"
   );
-  simplified_ldfes_quadrature.def(
+  sldfesq_quadrature_3d_xyz.def(
     py::init(
       [](py::kwargs& params)
       {
         static const std::vector<std::string> required_keys = {"level", "scattering_order"};
         auto [level, scattering_order] = extract_args_tuple<int, int>(params, required_keys);
-        std::shared_ptr<SimplifiedLDFESQ::Quadrature> quad(new SimplifiedLDFESQ::Quadrature(scattering_order));
-        quad->GenerateInitialRefinement(level);
-        return quad;
+        return std::make_shared<SLDFEsqQuadrature3DXYZ>(level, scattering_order);
       }
     ),
     R"(
@@ -306,9 +304,9 @@ WrapSLDFESQuadrature(py::module& aquad)
         Maximum scattering order supported by the angular quadrature.
     )"
   );
-  simplified_ldfes_quadrature.def(
+  sldfesq_quadrature_3d_xyz.def(
     "LocallyRefine",
-    &SimplifiedLDFESQ::Quadrature::LocallyRefine,
+    &SLDFEsqQuadrature3DXYZ::LocallyRefine,
     R"(
     Locally refines the cells.
 
@@ -326,9 +324,78 @@ WrapSLDFESQuadrature(py::module& aquad)
     py::arg("cone_size"),
     py::arg("dir_as_plane_normal") = false
   );
-  simplified_ldfes_quadrature.def(
+  sldfesq_quadrature_3d_xyz.def(
     "PrintQuadratureToFile",
-    &SimplifiedLDFESQ::Quadrature::PrintQuadratureToFile,
+    &SLDFEsqQuadrature3DXYZ::PrintQuadratureToFile,
+    R"(
+    Prints the quadrature to file.
+
+    Parameters
+    ----------
+    file_base: str
+        File base name.
+    )",
+    py::arg("file_base")
+  );
+
+  // 2D SLDFEsq quadrature
+  auto sldfesq_quadrature_2d_xy = py::class_<SLDFEsqQuadrature2DXY,
+                                             std::shared_ptr<SLDFEsqQuadrature2DXY>,
+                                             AngularQuadrature>(
+    aquad,
+    "SLDFEsqQuadrature2DXY",
+    R"(
+    Two-dimensional variant of the piecewise-linear finite element quadrature.
+
+    This quadrature is created from the 3D SLDFEsq set by removing directions with negative
+    xi.
+
+    Wrapper of :cpp:class:`opensn::SLDFEsqQuadrature2DXY`.
+    )"
+  );
+  sldfesq_quadrature_2d_xy.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        static const std::vector<std::string> required_keys = {"level", "scattering_order"};
+        auto [level, scattering_order] = extract_args_tuple<int, int>(params, required_keys);
+        return std::make_shared<SLDFEsqQuadrature2DXY>(level, scattering_order);
+      }
+    ),
+    R"(
+    Generates a 2D SLDFEsq quadrature by removing directions with negative xi.
+
+    Parameters
+    ----------
+    level: int
+        Number of subdivisions of the inscribed cube.
+    scattering_order: int
+        Maximum scattering order supported by the angular quadrature.
+    )"
+  );
+  sldfesq_quadrature_2d_xy.def(
+    "LocallyRefine",
+    &SLDFEsqQuadrature2DXY::LocallyRefine,
+    R"(
+    Locally refines the cells.
+
+    Parameters
+    ----------
+    ref_dir: pyopensn.math.Vector3
+        Reference direction :math:`\vec{r}`.
+    cone_size: float
+        Cone size (in radians) :math:`\theta`.
+    dir_as_plane_normal: bool, default=False
+        If true, interpret SQ-splitting as when :math:`|\omega \cdot \vec{r}| < \sin(\theta)`.
+        Otherwise, SQs will be split if :math:`\omega \cdot \vec{r} > \cos(\theta)`.
+    )",
+    py::arg("ref_dir"),
+    py::arg("cone_size"),
+    py::arg("dir_as_plane_normal") = false
+  );
+  sldfesq_quadrature_2d_xy.def(
+    "PrintQuadratureToFile",
+    &SLDFEsqQuadrature2DXY::PrintQuadratureToFile,
     R"(
     Prints the quadrature to file.
 
@@ -347,32 +414,33 @@ void
 WrapLebedevQuadrature(py::module& aquad)
 {
   // clang-format off
-  auto lebedev_quadrature = py::class_<LebedevQuadrature,
-                                       std::shared_ptr<LebedevQuadrature>,
-                                       AngularQuadrature>(
+  // Lebedev 3D XYZ quadrature
+  auto angular_quadrature_lebedev_3d_xyz = py::class_<LebedevQuadrature3DXYZ,
+                                                     std::shared_ptr<LebedevQuadrature3DXYZ>,
+                                                     AngularQuadrature>(
     aquad,
-    "LebedevQuadrature",
+    "LebedevQuadrature3DXYZ",
     R"(
-    Lebedev quadrature for spherical integration.
-    
+    Lebedev quadrature for 3D, XYZ geometry.
+
     This quadrature provides high-order accuracy for spherical integration with
     symmetric distribution of points on the sphere.
 
-    Wrapper of :cpp:class:`opensn::LebedevQuadrature`.
+    Wrapper of :cpp:class:`opensn::LebedevQuadrature3DXYZ`.
     )"
   );
-  
-  lebedev_quadrature.def(
+
+  angular_quadrature_lebedev_3d_xyz.def(
     py::init(
       [](py::kwargs& params)
       {
         static const std::vector<std::string> required_keys = {"quadrature_order", "scattering_order"};
         static const std::vector<std::pair<std::string, py::object>> optional_keys = {{"verbose", py::bool_(false)}};
-        return construct_from_kwargs<LebedevQuadrature, int, int, bool>(params, required_keys, optional_keys);
+        return construct_from_kwargs<LebedevQuadrature3DXYZ, unsigned int, unsigned int, bool>(params, required_keys, optional_keys);
       }
     ),
     R"(
-    Creates a Lebedev quadrature of the specified order.
+    Constructs a Lebedev quadrature for 3D, XYZ geometry.
 
     Parameters
     ----------
@@ -396,7 +464,7 @@ py_aquad(py::module& pyopensn)
   WrapQuadrature(aquad);
   WrapProductQuadrature(aquad);
   WrapCurvilinearProductQuadrature(aquad);
-  WrapSLDFESQuadrature(aquad);
+  WrapSLDFEsqQuadrature(aquad);
   WrapLebedevQuadrature(aquad);
 }
 

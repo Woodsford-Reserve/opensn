@@ -9,11 +9,11 @@ namespace opensn
 {
 
 double*
-SweepBoundary::PsiIncoming(uint64_t cell_local_id,
+SweepBoundary::PsiIncoming(std::uint32_t cell_local_id,
                            unsigned int face_num,
                            unsigned int fi,
                            unsigned int angle_num,
-                           int group_num)
+                           unsigned int group_num)
 {
   throw std::runtime_error(
     "SweepBoundary: PsiIncoming call made to boundary that has no such information.");

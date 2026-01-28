@@ -16,14 +16,15 @@ namespace opensn
 AAH_SPDS::AAH_SPDS(int id,
                    const Vector3& omega,
                    const std::shared_ptr<MeshContinuum> grid,
-                   bool allow_cycles)
+                   bool allow_cycles,
+                   bool use_gpus)
   : SPDS(omega, grid), id_(id), allow_cycles_(allow_cycles)
 {
   CALI_CXX_MARK_SCOPE("AAH_SPDS::AAH_SPDS");
 
   // Populate Cell Relationships
   size_t num_loc_cells = grid->local_cells.size();
-  std::vector<std::set<std::pair<int, double>>> cell_successors(num_loc_cells);
+  std::vector<std::set<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
   std::set<int> location_successors;
   std::set<int> location_dependencies;
 
@@ -87,6 +88,10 @@ AAH_SPDS::AAH_SPDS(int id,
   // Generate location-to-location dependencies
   global_dependencies_.resize(opensn::mpi_comm.size());
   CommunicateLocationDependencies(location_dependencies_, global_dependencies_);
+
+  // Copy levelized spls data to GPU
+  if (use_gpus)
+    CopySPLSDataOnDevice();
 }
 
 void
@@ -97,11 +102,23 @@ AAH_SPDS::BuildGlobalSweepFAS()
   CALI_CXX_MARK_SCOPE("AAH_SPDS::BuildGlobalSweepFAS");
 
   // Create global sweep graph
-  Graph global_tdg(opensn::mpi_comm.size());
+  const int comm_size = opensn::mpi_comm.size();
+  Graph global_tdg(comm_size);
 
-  for (int loc = 0; loc < opensn::mpi_comm.size(); ++loc)
-    for (int dep : global_dependencies_[loc])
-      boost::add_edge(dep, loc, 1.0, global_tdg);
+  for (int loc = 0; loc < comm_size; ++loc)
+  {
+    for (auto dep : global_dependencies_[loc])
+    {
+      double weight = 1.0;
+      if (not global_edge_weights_.empty())
+      {
+        const int idx = dep * comm_size + loc;
+        if (idx < global_edge_weights_.size() and global_edge_weights_[idx] > 0.0)
+          weight = global_edge_weights_[idx];
+      }
+      boost::add_edge(dep, loc, weight, global_tdg);
+    }
+  }
 
   // Remove cycles and generate the feedback arc set (FAS). The FAS is the list of edges that must
   // be removed from the graph to make it acyclic.
@@ -116,6 +133,40 @@ AAH_SPDS::BuildGlobalSweepFAS()
   }
 }
 
+std::vector<double>
+AAH_SPDS::ComputeLocalLocationEdgeWeights() const
+{
+  CALI_CXX_MARK_SCOPE("AAH_SPDS::ComputeLocalLocationEdgeWeights");
+
+  const int comm_size = opensn::mpi_comm.size();
+  std::vector<double> row(comm_size, 0.0);
+
+  constexpr double tolerance = 1.0e-16;
+
+  for (const auto& cell : grid_->local_cells)
+  {
+    const auto& face_orientations = cell_face_orientations_[cell.local_id];
+    std::size_t f = 0;
+    for (const auto& face : cell.faces)
+    {
+      if (face.has_neighbor and not face.IsNeighborLocal(grid_.get()) and
+          face_orientations[f] == FaceOrientation::OUTGOING)
+      {
+        const double mu = omega_.Dot(face.normal);
+        if (mu > tolerance)
+        {
+          const auto& adj_cell = grid_->cells[face.neighbor_id];
+          const int to_loc = adj_cell.partition_id;
+          row[to_loc] += mu * mu * face.area;
+        }
+      }
+      ++f;
+    }
+  }
+
+  return row;
+}
+
 void
 AAH_SPDS::BuildGlobalSweepTDG()
 {
@@ -125,12 +176,12 @@ AAH_SPDS::BuildGlobalSweepTDG()
   Graph global_tdg(opensn::mpi_comm.size());
 
   for (int loc = 0; loc < opensn::mpi_comm.size(); ++loc) // NOLINT
-    for (int dep : global_dependencies_[loc])
+    for (auto dep : global_dependencies_[loc])
       boost::add_edge(dep, loc, 1.0, global_tdg);
 
   // De-serialize edges
   std::vector<std::pair<int, int>> edges_to_remove;
-  edges_to_remove.resize(global_sweep_fas_.size() / 2, std::pair<int, int>(0, 0));
+  edges_to_remove.resize(global_sweep_fas_.size() / 2, std::make_pair(0, 0));
   int i = 0;
   for (auto& edge : edges_to_remove)
   {
@@ -141,8 +192,8 @@ AAH_SPDS::BuildGlobalSweepTDG()
   // Remove edges
   for (auto& edge_to_remove : edges_to_remove)
   {
-    int rlocI = edge_to_remove.first;
-    int locI = edge_to_remove.second;
+    auto rlocI = edge_to_remove.first;
+    auto locI = edge_to_remove.second;
 
     boost::remove_edge(rlocI, locI, global_tdg);
 
@@ -193,12 +244,10 @@ AAH_SPDS::BuildGlobalSweepTDG()
           continue;
 
         int dep_mapped_index = global_order_mapping[dep_loc];
-        if (global_sweep_order_rank[dep_mapped_index] > max_rank)
-          max_rank = global_sweep_order_rank[dep_mapped_index];
+        max_rank = std::max(global_sweep_order_rank[dep_mapped_index], max_rank);
       }
       global_sweep_order_rank[k] = max_rank + 1;
-      if ((max_rank + 1) > abs_max_rank)
-        abs_max_rank = max_rank + 1;
+      abs_max_rank = std::max(max_rank + 1, abs_max_rank);
     }
   }
 
@@ -211,6 +260,23 @@ AAH_SPDS::BuildGlobalSweepTDG()
         stdg.item_id.push_back(global_linear_sweep_order[k]);
     global_sweep_planes_.push_back(stdg);
   }
+}
+
+#ifndef __OPENSN_WITH_GPU__
+void
+AAH_SPDS::CopySPLSDataOnDevice()
+{
+}
+
+void
+AAH_SPDS::FreeDeviceData()
+{
+}
+#endif
+
+AAH_SPDS::~AAH_SPDS()
+{
+  FreeDeviceData();
 }
 
 } // namespace opensn

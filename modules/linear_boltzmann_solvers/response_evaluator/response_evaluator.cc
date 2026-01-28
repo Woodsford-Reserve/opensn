@@ -166,7 +166,26 @@ ResponseEvaluator::GetSourceOptionsBlock()
 
   params.AddOptionalParameterArray(
     "boundary", {}, "An array of tables containing boundary source specifications.");
-  params.LinkParameterToBlock("boundary", "BoundaryOptionsBlock");
+  params.LinkParameterToBlock("boundary", "response::BoundarySourceOptionsBlock");
+
+  return params;
+}
+
+InputParameters
+ResponseEvaluator::GetBoundarySourceOptionsBlock()
+{
+  InputParameters params;
+
+  params.SetGeneralDescription("Boundary source specification for response evaluations.");
+  params.SetClassName("Response Boundary Source");
+  params.AddRequiredParameter<std::string>("name",
+                                           "Boundary name that identifies the specific boundary");
+  params.AddRequiredParameter<std::string>("type", "Boundary type specification.");
+  params.AddOptionalParameterArray<double>("group_strength",
+                                           {},
+                                           "Required only if \"type\" is \"isotropic\". An array "
+                                           "of isotropic strength per group");
+  params.ConstrainParameterRange("type", AllowableRangeList::New({"isotropic"}));
 
   return params;
 }
@@ -221,7 +240,7 @@ ResponseEvaluator::SetSourceOptions(const InputParameters& input)
     const auto& user_bsrc_params = params.GetParam("boundary");
     for (int p = 0; p < user_bsrc_params.GetNumParameters(); ++p)
     {
-      auto bsrc_params = LBSProblem::GetBoundaryOptionsBlock();
+      auto bsrc_params = ResponseEvaluator::GetBoundarySourceOptionsBlock();
       bsrc_params.AssignParameters(user_bsrc_params.GetParam(p));
       SetBoundarySourceOptions(bsrc_params);
     }
@@ -235,7 +254,7 @@ ResponseEvaluator::GetMaterialSourceOptionsBlock()
   params.SetGeneralDescription(
     "Options for adding material-based forward sources to the response evaluator.");
 
-  params.AddRequiredParameter<int>("block_id", "The block id the source belongs to.");
+  params.AddRequiredParameter<unsigned int>("block_id", "The block id the source belongs to.");
   params.AddRequiredParameterArray("strength", "The group-wise material source strength.");
 
   return params;
@@ -244,7 +263,7 @@ ResponseEvaluator::GetMaterialSourceOptionsBlock()
 void
 ResponseEvaluator::SetMaterialSourceOptions(const InputParameters& params)
 {
-  const auto blkid = params.GetParamValue<int>("block_id");
+  const auto blkid = params.GetParamValue<unsigned int>("block_id");
   OpenSnInvalidArgumentIf(material_sources_.count(blkid) > 0,
                           "A material source for block id " + std::to_string(blkid) +
                             " already exists.");
@@ -265,9 +284,14 @@ void
 ResponseEvaluator::SetBoundarySourceOptions(const InputParameters& params)
 {
   const auto bndry_name = params.GetParamValue<std::string>("name");
+  if (params.IsParameterValid("function"))
+    throw std::runtime_error("Boundary '" + bndry_name +
+                             "' in ResponseEvaluator does not support \"function\".");
   const auto bndry_type = params.GetParamValue<std::string>("type");
 
-  const auto bid = LBSProblem::supported_boundary_names.at(bndry_name);
+  auto grid = do_problem_->GetGrid();
+  const auto bnd_name_map = grid->GetBoundaryNameMap();
+  const auto bid = bnd_name_map.at(bndry_name);
   if (bndry_type == "isotropic")
   {
     OpenSnInvalidArgumentIf(not params.Has("group_strength"),
@@ -440,7 +464,7 @@ ResponseEvaluator::EvaluateResponse(const std::string& buffer) const
 
   // Volumetric sources
   for (const auto& volumetric_source : volumetric_sources_)
-    for (const uint64_t local_id : volumetric_source->GetSubscribers())
+    for (const std::uint32_t local_id : volumetric_source->GetSubscribers())
     {
       const auto& cell = grid->local_cells[local_id];
       const auto& transport_view = transport_views[cell.local_id];

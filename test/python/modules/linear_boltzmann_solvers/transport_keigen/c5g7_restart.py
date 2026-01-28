@@ -20,9 +20,10 @@ if __name__ == "__main__":
 
     # Setup mesh
     meshgen = FromFileMeshGenerator(
-        filename="c5g7/mesh/2D_c5g7_coarse.msh",
+        filename="c5g7/mesh/2d_c5g7_coarse.msh",
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Create cross sections
     xss = []
@@ -63,7 +64,6 @@ if __name__ == "__main__":
             },
         ],
         xs_map=xs_map,
-        scattering_order=1,
         boundary_conditions=[
             {"name": "xmin", "type": "reflecting"},
             {"name": "ymin", "type": "reflecting"},
@@ -74,7 +74,6 @@ if __name__ == "__main__":
             "power_field_function_on": True,
             "power_default_kappa": 1.0,
             "power_normalization": 1.0,
-            "save_angular_flux": True,
             "read_restart_path": "c5g7_restart/c5g7",
             # "restart_writes_enabled": True,
             # "write_delayed_psi_to_restart": True,

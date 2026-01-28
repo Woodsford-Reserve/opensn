@@ -85,8 +85,8 @@ SMMAcceleration::Initialize()
   UnknownManager diff_uk_man;
   diff_uk_man.AddUnknown(UnknownType::VECTOR_N, num_gs_groups);
 
-  for (const auto& [bid, bc] : do_problem_.GetBoundaryPreferences())
-    if ((bc.type == LBSBoundaryType::ISOTROPIC) or (bc.type == LBSBoundaryType::ARBITRARY))
+  for (const auto& [bid, bc] : do_problem_.GetBoundaryDefinitions())
+    if ((bc.first == LBSBoundaryType::ISOTROPIC) or (bc.first == LBSBoundaryType::ARBITRARY))
       throw std::logic_error("Only vacuum and reflective boundaries are valid for "
                              "k-eigenvalue problems.");
 
@@ -94,7 +94,7 @@ SMMAcceleration::Initialize()
 
   // Create the diffusion materials
   const auto xs_map = PackGroupsetXS(
-    do_problem_.GetMatID2XSMap(), front_gs_.groups.front().id, front_gs_.groups.back().id);
+    do_problem_.GetBlockID2XSMap(), front_gs_.groups.front().id, front_gs_.groups.back().id);
 
   // Create the appropriate solver
   log.Log() << "Creating diffusion solver";
@@ -252,7 +252,7 @@ SMMAcceleration::ComputeAuxiliaryUnitCellMatrices()
   };
 
   auto swf = std::make_shared<SpatialWeightFunction>();
-  const auto geom_type = do_problem_.GetOptions().geometry_type;
+  const auto geom_type = do_problem_.GetGeometryType();
   if (geom_type == GeometryType::ONED_SPHERICAL)
     swf = std::make_shared<SphericalWeightFunction>();
   else if (geom_type == GeometryType::TWOD_CYLINDRICAL)
@@ -521,7 +521,7 @@ SMMAcceleration::ComputeSourceCorrection() const
 {
   const auto& grid = do_problem_.GetGrid();
   const auto& pwld = do_problem_.GetSpatialDiscretization();
-  const auto& matid_to_xs_map = do_problem_.GetMatID2XSMap();
+  const auto& matid_to_xs_map = do_problem_.GetBlockID2XSMap();
   const auto& unit_cell_matrices = do_problem_.GetUnitCellMatrices();
 
   const auto& diff_sd = diffusion_solver_->GetSpatialDiscretization();

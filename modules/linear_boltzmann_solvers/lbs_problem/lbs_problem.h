@@ -6,13 +6,16 @@
 #include "modules/problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/sweep.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/groupset/lbs_groupset.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/source_functions/source_flags.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/point_source/point_source.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/volumetric_source/volumetric_source.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_structs.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/lbs_view.h"
 #include "framework/math/spatial_discretization/spatial_discretization.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/math/linear_solver/linear_solver.h"
 #include "framework/math/spatial_discretization/finite_element/unit_cell_matrices.h"
+#include "framework/math/geometry.h"
 #include <petscksp.h>
 #include <any>
 #include <chrono>
@@ -22,7 +25,6 @@ namespace opensn
 
 class MPICommunicatorSet;
 class GridFaceHistogram;
-class TimeIntegration;
 class AGSLinearSolver;
 class WGSLinearSolver;
 struct WGSContext;
@@ -31,7 +33,7 @@ struct WGSContext;
 class LBSProblem : public Problem
 {
 public:
-  explicit LBSProblem(const std::string& name, std::shared_ptr<MeshContinuum> grid);
+  explicit LBSProblem(std::string name, std::shared_ptr<MeshContinuum> grid);
 
   /// Input parameters based construction.
   explicit LBSProblem(const InputParameters& params);
@@ -50,12 +52,39 @@ public:
 
   void SetOptions(const InputParameters& input);
 
-  void SetBoundaryOptions(const InputParameters& params);
+  /// Returns simulation time in seconds for time dependent problems
+  double GetTime() const;
+
+  /// Sets simulation time in seconds for time dependent problems
+  void SetTime(double time);
+
+  /// Sets dt
+  void SetTimeStep(double dt);
+
+  /// Returns dt
+  double GetTimeStep() const;
+
+  /// Sets theta for time discretization
+  void SetTheta(double theta);
+
+  /// Sets theta for time discretization
+  double GetTheta() const;
+
+  /// Is the problem time dependent
+  bool IsTimeDependent() const;
 
   void SetAdjoint(bool adjoint);
 
+  GeometryType GetGeometryType() const;
+
   /// Returns the number of moments for the solver. This will only be non-zero after initialization.
   size_t GetNumMoments() const;
+
+  unsigned int GetMaxCellDOFCount() const;
+
+  unsigned int GetMinCellDOFCount() const;
+
+  bool UseGPUs() const;
 
   /// Returns the number of groups for the solver. This will only be non-zero after initialization.
   size_t GetNumGroups() const;
@@ -100,12 +129,15 @@ public:
   const std::vector<std::shared_ptr<VolumetricSource>>& GetVolumetricSources() const;
 
   /// Clears all the boundary conditions from the solver.
-  void ClearBoundaries();
+  virtual void ClearBoundaries() = 0;
 
   size_t& GetLastRestartTime();
 
   /// Returns a reference to the map of material ids to XSs.
-  const std::map<int, std::shared_ptr<MultiGroupXS>>& GetMatID2XSMap() const;
+  const BlockID2XSMap& GetBlockID2XSMap() const;
+
+  /// Replaces the map of block ids to XSs and refreshes material data.
+  void SetBlockID2XSMap(const BlockID2XSMap& xs_map);
 
   /// Obtains a reference to the grid.
   std::shared_ptr<MeshContinuum> GetGrid() const;
@@ -126,10 +158,10 @@ public:
   const std::map<uint64_t, UnitCellMatrices>& GetUnitGhostCellMatrices() const;
 
   /// Returns a reference to the list of local cell transport views.
-  const std::vector<CellLBSView>& GetCellTransportViews() const;
+  std::vector<CellLBSView>& GetCellTransportViews();
 
-  /// Read/Write access to the boundary preferences.
-  std::map<uint64_t, BoundaryPreference>& GetBoundaryPreferences();
+  /// Returns a const reference to the list of local cell transport views.
+  const std::vector<CellLBSView>& GetCellTransportViews() const;
 
   /// Obtains a reference to the unknown manager for flux-moments.
   const UnknownManager& GetUnknownManager() const;
@@ -230,19 +262,7 @@ public:
    */
   virtual void ReorientAdjointSolution() {};
 
-private:
-  /// Initialize groupsets
-  void InitializeGroupsets(const InputParameters& params);
-
-  /// Initializes materials
-  void InitializeXSmapAndDensities(const InputParameters& params);
-  void InitializeMaterials();
-
-  /// Initialize sources
-  void InitializeSources(const InputParameters& params);
-
-  /// Initialize boundary conditions
-  void InitializeBoundaryConditions(const InputParameters& params);
+  virtual void UpdatePsiOld() {};
 
 protected:
   virtual void PrintSimHeader();
@@ -259,6 +279,9 @@ protected:
   /// Initializes boundaries.
   virtual void InitializeBoundaries() {}
 
+  /// Derived problems handle boundary options.
+  virtual void SetBoundaryOptions(const InputParameters& params) = 0;
+
   void InitializeSolverSchemes();
 
   virtual void InitializeWGSSolvers() {};
@@ -272,6 +295,11 @@ protected:
   virtual void ZeroSolutions() = 0;
 
   LBSOptions options_;
+  double time_ = 0.0;
+  bool time_dependent_ = false;
+  double theta_ = 1.0;
+  double dt_ = 1.0;
+  GeometryType geometry_type_ = GeometryType::INVALID;
   size_t num_moments_ = 0;
   size_t num_groups_ = 0;
   unsigned int scattering_order_ = 0;
@@ -281,7 +309,7 @@ protected:
   std::vector<LBSGroup> groups_;
   std::vector<LBSGroupset> groupsets_;
 
-  std::map<int, std::shared_ptr<MultiGroupXS>> block_id_to_xs_map_;
+  BlockID2XSMap block_id_to_xs_map_;
 
   std::vector<std::shared_ptr<PointSource>> point_sources_;
   std::vector<std::shared_ptr<VolumetricSource>> volumetric_sources_;
@@ -296,12 +324,10 @@ protected:
   std::map<uint64_t, UnitCellMatrices> unit_ghost_cell_matrices_;
   std::vector<CellLBSView> cell_transport_views_;
 
-  std::map<uint64_t, BoundaryPreference> boundary_preferences_;
-
   UnknownManager flux_moments_uk_man_;
 
-  size_t max_cell_dof_count_ = 0;
-  size_t min_cell_dof_count_ = 0;
+  unsigned int max_cell_dof_count_ = 0;
+  unsigned int min_cell_dof_count_ = 0;
   uint64_t local_node_count_ = 0;
   uint64_t global_node_count_ = 0;
 
@@ -318,12 +344,9 @@ protected:
   std::map<std::pair<size_t, size_t>, size_t> phi_field_functions_local_map_;
   size_t power_gen_fieldfunc_local_handle_ = 0;
 
-  /// Time integration parameter meant to be set by an executor
-  std::shared_ptr<const TimeIntegration> time_integration_ = nullptr;
-
   /**
-   * @brief Data carriers for necessary data to run the sweep on GPU.
-   * @details These objects manage GPU memory allocation automatically, organize cross-section,
+   * \brief Data carriers for necessary data to run the sweep on GPU.
+   * \details These objects manage GPU memory allocation automatically, organize cross-section,
    * outflow, and mesh data into contiguous memory on the CPU, and handle copying it to the GPU.
    *
    * There are 3 carriers, respectively for cross sections, outflow and mesh.
@@ -336,21 +359,34 @@ protected:
   /// Flag indicating if GPU acceleration is enabled.
   bool use_gpus_;
 
-  /// Checks if the current CPU is associated with any GPU.
-  static void CheckCapableDevices();
+private:
+  /// Initialize groupsets
+  void InitializeGroupsets(const InputParameters& params);
+
+  /// Initializes materials
+  void InitializeXSmapAndDensities(const InputParameters& params);
+  void InitializeMaterials();
+
+  /// Initialize sources
+  void InitializeSources(const InputParameters& params);
+
+  /// Initialize boundary conditions
+  void InitializeBoundaryConditions(const InputParameters& params);
 
 public:
-  static std::map<std::string, uint64_t> supported_boundary_names;
-  static std::map<uint64_t, std::string> supported_boundary_ids;
+  /// Max number of DOFs per cell that the sweep kernel on GPU can handle.
+  static constexpr std::uint32_t max_dofs_gpu = 10;
 
   /// Returns the input parameters for this object.
   static InputParameters GetInputParameters();
 
   static InputParameters GetOptionsBlock();
 
-  static InputParameters GetBoundaryOptionsBlock();
-
   static InputParameters GetXSMapEntryBlock();
+
+protected:
+  /// Checks if the current CPU is associated with any GPU.
+  static void CheckCapableDevices();
 };
 
 } // namespace opensn

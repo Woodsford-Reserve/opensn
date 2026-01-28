@@ -34,6 +34,7 @@ if __name__ == "__main__":
         filename="../../../../assets/mesh/fuel_hex.e",
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set Materials (Fuel)
     num_groups = 2
@@ -62,7 +63,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0], "xs": xs_fuel_g2},
         ],
-        scattering_order=1,
         boundary_conditions=[
             {"name": "xmin", "type": "reflecting"},
             {"name": "xmax", "type": "reflecting"},

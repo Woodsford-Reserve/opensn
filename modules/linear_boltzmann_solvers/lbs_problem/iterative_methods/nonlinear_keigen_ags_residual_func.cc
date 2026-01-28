@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2024 The OpenSn Authors <https://open-sn.github.io/opensn/>
 // SPDX-License-Identifier: MIT
 
+#include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/nonlinear_keigen_ags_residual_func.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/nonlinear_keigen_ags_context.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/wgs_context.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_vecops.h"
@@ -16,7 +17,7 @@ PetscErrorCode
 NLKEigenResidualFunction(SNES snes, Vec phi, Vec r, void* ctx)
 {
   const std::string fname = "SNESKResidualFunction";
-  auto& function_context = *((KResidualFunctionContext*)ctx);
+  auto& function_context = *static_cast<KResidualFunctionContext*>(ctx);
 
   NLKEigenAGSContext* nl_context_ptr = nullptr;
   SNESGetApplicationContext(snes, static_cast<void*>(&nl_context_ptr));
@@ -27,7 +28,7 @@ NLKEigenResidualFunction(SNES snes, Vec phi, Vec r, void* ctx)
 
   auto active_set_source_function = lbs_problem->GetActiveSetSourceFunction();
 
-  std::vector<int> groupset_ids;
+  std::vector<unsigned int> groupset_ids;
   for (const auto& groupset : lbs_problem->GetGroupsets())
     groupset_ids.push_back(groupset.id);
 

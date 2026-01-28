@@ -21,8 +21,6 @@ class VectorGhostCommunicator;
 class DiscreteOrdinatesKEigenAcceleration
 {
 public:
-  static InputParameters GetInputParameters();
-
   explicit DiscreteOrdinatesKEigenAcceleration(const InputParameters& params);
 
   virtual ~DiscreteOrdinatesKEigenAcceleration() = default;
@@ -76,12 +74,6 @@ protected:
     std::map<uint64_t, uint64_t> ghost_global_id_2_local_map;
   };
 
-  static std::vector<uint64_t> MakePWLDGhostIndices(const SpatialDiscretization& pwld,
-                                                    const UnknownManager& uk_man);
-
-  static GhostInfo MakePWLDGhostInfo(const SpatialDiscretization& pwld,
-                                     const UnknownManager& uk_man);
-
   /**
    * Takes an input vector that is the local version of a PWLD discrete space and then
    * makes it continuous by applying nodal averages.
@@ -101,7 +93,7 @@ protected:
   /// Absolute residual tolerance from parameters
   const double l_abs_tol_;
   /// Maximum allowable iterations from parameters
-  const int max_iters_;
+  const unsigned int max_iters_;
   /// Verbosity flag from parameters
   const bool verbose_;
   /// PETSc options from parameters
@@ -142,5 +134,16 @@ private:
   ///@{
   std::vector<double> copy_only_phi0_tmp_;
   ///@}
+
+public:
+  static InputParameters GetInputParameters();
+
+protected:
+  static std::vector<uint64_t> MakePWLDGhostIndices(const SpatialDiscretization& pwld,
+                                                    const UnknownManager& uk_man);
+
+  static GhostInfo MakePWLDGhostInfo(const SpatialDiscretization& pwld,
+                                     const UnknownManager& uk_man);
 };
+
 } // namespace opensn

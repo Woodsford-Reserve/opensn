@@ -22,9 +22,10 @@ if "opensn_console" not in globals():
 if __name__ == "__main__":
 
     meshgen = FromFileMeshGenerator(
-        filename="../../../../assets/mesh/Rectangular2D2MatGmshV4.msh",
+        filename="../../../../assets/mesh/rectangular_2d_2mat_gmsh_v4.msh",
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Material
     num_groups = 64
@@ -59,7 +60,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [1, 2], "xs": xs_diag},
         ],
-        scattering_order=0,
         volumetric_sources=[mg_src],
         boundary_conditions=[
             {"name": "xmin", "type": "reflecting"},

@@ -12,9 +12,6 @@ namespace opensn
 /// Manages the workstages of a single angle set.
 class AAH_AngleSet : public AngleSet
 {
-protected:
-  AAH_ASynchronousCommunicator async_comm_;
-
 public:
   AAH_AngleSet(size_t id,
                size_t num_groups,
@@ -45,7 +42,7 @@ public:
                             uint64_t cell_local_id,
                             unsigned int face_num,
                             unsigned int fi,
-                            int g,
+                            unsigned int g,
                             bool surface_source_active) override;
 
   double* PsiReflected(uint64_t boundary_id,
@@ -53,6 +50,9 @@ public:
                        uint64_t cell_local_id,
                        unsigned int face_num,
                        unsigned int fi) override;
+
+protected:
+  AAH_ASynchronousCommunicator async_comm_;
 };
 
 } // namespace opensn

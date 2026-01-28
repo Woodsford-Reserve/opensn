@@ -76,12 +76,10 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0], "xs": xs_simple_fissile},
         ],
-        scattering_order=scat_order,
         options={
             "use_precursors": use_precursors,
             "verbose_inner_iterations": False,
-            "verbose_outer_iterations": True,
-            "save_angular_flux": True,
+            "verbose_outer_iterations": True
         },
         sweep_type="CBC",
     )

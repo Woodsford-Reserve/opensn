@@ -5,6 +5,7 @@
 
 #include "framework/data_types/vector3.h"
 #include "framework/data_types/byte_array.h"
+#include <limits>
 #include <tuple>
 #include <vector>
 #include <cstdint>
@@ -51,7 +52,7 @@ public:
   int GetNeighborPartitionID(const MeshContinuum* grid) const;
 
   /// Determines the neighbor's local id.
-  uint64_t GetNeighborLocalID(const MeshContinuum* grid) const;
+  std::uint32_t GetNeighborLocalID(const MeshContinuum* grid) const;
 
   /// Determines the neighbor's associated face.
   int GetNeighborAdjacentFaceIndex(const MeshContinuum* grid) const;
@@ -62,16 +63,15 @@ public:
   /// Serializes a face into a vector of bytes.
   ByteArray Serialize() const;
 
-  /// Deserializes a face from a set of raw data
-  static CellFace DeSerialize(const ByteArray& raw, size_t& address);
-
   /// Provides string information of the face.
   std::string ToString() const;
+
+  void ComputeGeometricInfo(const MeshContinuum* grid, const Cell& cell, unsigned int f);
 
   /// Flag indicating whether face has a neighbor
   bool has_neighbor = false;
   /// If face has neighbor, contains the global_id, otherwise, contains boundary_id.
-  uint64_t neighbor_id = 0;
+  uint64_t neighbor_id = std::numeric_limits<uint64_t>::max();
 
   /// The average/geometric normal
   Vector3 normal;
@@ -82,7 +82,10 @@ public:
 
   /// A list of the vertices
   std::vector<uint64_t> vertex_ids;
-  void ComputeGeometricInfo(const MeshContinuum* grid, const Cell& cell, unsigned int f);
+
+public:
+  /// Deserializes a face from a set of raw data
+  static CellFace DeSerialize(const ByteArray& raw, size_t& address);
 };
 
 /// Generic mesh cell object
@@ -107,17 +110,14 @@ public:
   /// Serializes a cell into a vector of bytes.
   ByteArray Serialize() const;
 
-  /// Deserializes a cell from a vector of bytes.
-  static Cell DeSerialize(const ByteArray& raw, size_t& address);
-
   /// Provides string information of the cell.
   std::string ToString() const;
 
   uint64_t global_id = 0;
-  uint64_t local_id = 0;
+  std::uint32_t local_id = 0;
   int partition_id = 0;
   int num_parition = 0;
-  int block_id = -1;
+  unsigned int block_id = std::numeric_limits<unsigned int>::max();
 
   Vector3 centroid;
   double volume = 0.0;
@@ -130,6 +130,10 @@ private:
   const CellType cell_type_;
   /// Subtype i.e. SLAB, QUADRILATERAL, HEXAHEDRON
   const CellType cell_sub_type_;
+
+public:
+  /// Deserializes a cell from a vector of bytes.
+  static Cell DeSerialize(const ByteArray& raw, size_t& address);
 };
 
 } // namespace opensn

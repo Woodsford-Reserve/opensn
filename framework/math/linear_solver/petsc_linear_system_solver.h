@@ -5,6 +5,7 @@
 
 #include "framework/math/linear_solver/linear_system_solver.h"
 #include "framework/math/linear_solver/linear_solver_context.h"
+#include <petscsystypes.h>
 #include <string>
 #include <utility>
 #include <memory>
@@ -21,8 +22,8 @@ public:
     double residual_relative = 1.0e-50;
     double residual_absolute = 1.0e-6;
     double residual_divergence = 1.0e6;
-    int maximum_iterations = 100;
-    int gmres_restart_interval = 100;
+    PetscInt maximum_iterations = 100;
+    PetscInt gmres_restart_interval = 100;
     double gmres_breakdown_tolerance = 1.0e6;
   } tolerance_options;
 
@@ -74,7 +75,7 @@ private:
   std::string PETScIterativeMethodName();
 
 protected:
-  static int LinearSolverMatrixAction(Mat matrix, Vec vector, Vec action);
+  static PetscErrorCode LinearSolverMatrixAction(Mat matrix, Vec vector, Vec action);
 };
 
 } // namespace opensn

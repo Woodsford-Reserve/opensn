@@ -14,11 +14,6 @@ class CBC_SPDS;
 
 class CBC_AngleSet : public AngleSet
 {
-protected:
-  const CBC_SPDS& cbc_spds_;
-  std::vector<Task> current_task_list_;
-  CBC_ASynchronousCommunicator async_comm_;
-
 public:
   CBC_AngleSet(size_t id,
                size_t num_groups,
@@ -54,7 +49,7 @@ public:
                             uint64_t cell_local_id,
                             unsigned int face_num,
                             unsigned int fi,
-                            int g,
+                            unsigned int g,
                             bool surface_source_active) override;
 
   double* PsiReflected(uint64_t boundary_id,
@@ -62,6 +57,11 @@ public:
                        uint64_t cell_local_id,
                        unsigned int face_num,
                        unsigned int fi) override;
+
+protected:
+  const CBC_SPDS& cbc_spds_;
+  std::vector<Task> current_task_list_;
+  CBC_ASynchronousCommunicator async_comm_;
 };
 
 } // namespace opensn

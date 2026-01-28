@@ -6,13 +6,78 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/boundary/sweep_boundary.h"
 #include <vector>
 #include <limits>
-
 namespace opensn
 {
 
 /// Reflective boundary condition.
 class ReflectingBoundary : public SweepBoundary
 {
+public:
+  ReflectingBoundary(size_t num_groups,
+                     const Vector3& normal,
+                     CoordinateSystemType coord_type = CoordinateSystemType::CARTESIAN)
+    : SweepBoundary(LBSBoundaryType::REFLECTING, num_groups, coord_type), normal_(normal)
+  {
+  }
+
+  const Vector3& GetNormal() const { return normal_; }
+
+  const Vector3* GetNormalForReflection() const override { return &normal_; }
+
+  bool HasDelayedAngularFlux() const override { return true; }
+
+  void InitializeDelayedAngularFlux(const std::shared_ptr<MeshContinuum>& grid,
+                                    const AngularQuadrature& quadrature) override;
+
+  void FinalizeDelayedAngularFluxSetup(
+    uint64_t boundary_id,
+    const std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries) override;
+
+  void ZeroOpposingDelayedAngularFluxOld() override;
+
+  size_t CountDelayedAngularDOFsNew() const override;
+
+  size_t CountDelayedAngularDOFsOld() const override;
+
+  void AppendNewDelayedAngularDOFsToVector(std::vector<double>& output) const override;
+
+  void AppendOldDelayedAngularDOFsToVector(std::vector<double>& output) const override;
+
+  void AppendNewDelayedAngularDOFsToArray(int64_t& index, double* buffer) const override;
+
+  void AppendOldDelayedAngularDOFsToArray(int64_t& index, double* buffer) const override;
+
+  void SetNewDelayedAngularDOFsFromArray(int64_t& index, const double* buffer) override;
+
+  void SetOldDelayedAngularDOFsFromArray(int64_t& index, const double* buffer) override;
+
+  void SetNewDelayedAngularDOFsFromVector(const std::vector<double>& values,
+                                          size_t& index) override;
+
+  void SetOldDelayedAngularDOFsFromVector(const std::vector<double>& values,
+                                          size_t& index) override;
+
+  void CopyDelayedAngularFluxOldToNew() override;
+
+  void CopyDelayedAngularFluxNewToOld() override;
+
+  double* PsiIncoming(std::uint32_t cell_local_id,
+                      unsigned int face_num,
+                      unsigned int fi,
+                      unsigned int angle_num,
+                      unsigned int group_num) override;
+
+  double* PsiOutgoing(uint64_t cell_local_id,
+                      unsigned int face_num,
+                      unsigned int fi,
+                      unsigned int angle_num) override;
+
+  void UpdateAnglesReadyStatus(const std::vector<std::uint32_t>& angles) override;
+
+  bool CheckAnglesReadyStatus(const std::vector<std::uint32_t>& angles) override;
+
+  void ResetAnglesReadyStatus() override;
+
 protected:
   const Vector3 normal_;
   bool opposing_reflected_ = false;
@@ -27,45 +92,15 @@ protected:
   std::vector<int> reflected_anglenum_;
   std::vector<bool> angle_readyflags_;
 
-public:
-  ReflectingBoundary(size_t num_groups,
-                     const Vector3& normal,
-                     CoordinateSystemType coord_type = CoordinateSystemType::CARTESIAN)
-    : SweepBoundary(LBSBoundaryType::REFLECTING, num_groups, coord_type), normal_(normal)
-  {
-  }
+private:
+  template <typename Fn>
+  void ForEachDelayedAngularFlux(bool use_old_store, Fn&& fn);
 
-  const Vector3& GetNormal() const { return normal_; }
+  template <typename Fn>
+  void ForEachDelayedAngularFluxConst(bool use_old_store, Fn&& fn) const;
 
-  bool IsOpposingReflected() const { return opposing_reflected_; }
-
-  void SetOpposingReflected(bool value) { opposing_reflected_ = value; }
-
-  AngularFluxData& GetBoundaryFluxNew() { return boundary_flux_; }
-
-  AngularFluxData& GetBoundaryFluxOld() { return boundary_flux_old_; }
-
-  std::vector<int>& GetReflectedAngleIndexMap() { return reflected_anglenum_; }
-
-  std::vector<bool>& GetAngleReadyFlags() { return angle_readyflags_; }
-
-  double* PsiIncoming(uint64_t cell_local_id,
-                      unsigned int face_num,
-                      unsigned int fi,
-                      unsigned int angle_num,
-                      int group_num) override;
-
-  double* PsiOutgoing(uint64_t cell_local_id,
-                      unsigned int face_num,
-                      unsigned int fi,
-                      unsigned int angle_num) override;
-
-  void UpdateAnglesReadyStatus(const std::vector<std::uint32_t>& angles) override;
-
-  bool CheckAnglesReadyStatus(const std::vector<std::uint32_t>& angles) override;
-
-  /// Resets angle ready flags to false.
-  void ResetAnglesReadyStatus();
+private:
+  static constexpr double epsilon_ = 1.0e-8;
 };
 
 } // namespace opensn

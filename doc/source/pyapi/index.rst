@@ -43,6 +43,16 @@ Function wrappers
 Angular quadrature
 ------------------
 
+Quadrature points
+^^^^^^^^^^^^^^^^^
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+   :template: python.rst
+
+   aquad.QuadraturePointPhiTheta
+
 Base class
 ^^^^^^^^^^
 
@@ -80,6 +90,16 @@ Product quadratures
 
    aquad.GLCProductQuadrature2DRZ
 
+Lebedev quadrature
+^^^^^^^^^^^^^^^^^^
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+   :template: python.rst
+
+   aquad.LebedevQuadrature3DXYZ
+
 Simplified LDFES quadrature
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -88,7 +108,8 @@ Simplified LDFES quadrature
    :nosignatures:
    :template: python.rst
 
-   aquad.SLDFESQuadrature
+   aquad.SLDFEsqQuadrature3DXYZ
+   aquad.SLDFEsqQuadrature2DXY
 
 
 Field functions
@@ -122,6 +143,7 @@ Interpolation
    :nosignatures:
    :template: python.rst
 
+   fieldfunc.FieldFunctionInterpolation
    fieldfunc.FieldFunctionInterpolationPoint
    fieldfunc.FieldFunctionInterpolationLine
    fieldfunc.FieldFunctionInterpolationVolume
@@ -264,6 +286,7 @@ Base class
    :nosignatures:
    :template: noinit.rst
 
+   solver.Problem
    solver.LBSProblem
 
 Discrete ordinates problem
@@ -309,6 +332,16 @@ Steady state source solver
    :template: python.rst
 
    solver.SteadyStateSourceSolver
+
+Time dependent source solver
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+   :template: python.rst
+
+   solver.TimeDependentSourceSolver
 
 Non-linear k-eigen
 ^^^^^^^^^^^^^^^^^^

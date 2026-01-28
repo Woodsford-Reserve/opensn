@@ -10,6 +10,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/uncollided_problem/uncollided_problem.h"
+#include "modules/linear_boltzmann_solvers/solvers/time_dependent_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/steady_state_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/pi_keigen_solver.h"
@@ -91,11 +92,6 @@ WrapSolver(py::module& slv)
     "Execute",
     &Solver::Execute,
     "Execute the solver."
-  );
-  solver.def(
-    "Step",
-    &Solver::Step,
-    "Step the solver."
   );
   solver.def(
     "Advance",
@@ -469,28 +465,44 @@ WrapLBS(py::module& slv)
     )"
   );
   lbs_problem.def(
-    "SetBoundaryOptions",
+    "SetXSMap",
     [](LBSProblem& self, py::kwargs& params)
     {
+      BlockID2XSMap xs_map;
       for (auto [key, value] : params)
       {
         auto c_key = key.cast<std::string>();
-        if (c_key == "clear_boundary_conditions")
-          self.ClearBoundaries();
-        else if (c_key == "boundary_conditions")
+        if (c_key == "xs_map")
         {
-          auto boundaries = value.cast<py::list>();
-          for (auto boundary : boundaries)
+          auto xs_entries = value.cast<py::list>();
+          for (auto entry : xs_entries)
           {
-            InputParameters input = LBSProblem::GetBoundaryOptionsBlock();
-            input.AssignParameters(pyobj_to_param_block("", boundary.cast<py::dict>()));
-            self.SetBoundaryOptions(input);
+            InputParameters xs_entry_pars = LBSProblem::GetXSMapEntryBlock();
+            xs_entry_pars.AssignParameters(pyobj_to_param_block("", entry.cast<py::dict>()));
+            const auto& block_ids =
+              xs_entry_pars.GetParam("block_ids").GetVectorValue<unsigned int>();
+            auto xs = xs_entry_pars.GetSharedPtrParam<MultiGroupXS>("xs");
+            for (const auto& block_id : block_ids)
+              xs_map[block_id] = xs;
           }
         }
         else
-          throw std::runtime_error("Invalid argument provided to SetBoundaryOptions.\n");
+          throw std::runtime_error("Invalid argument provided to SetXSMap.\n");
       }
-    }
+      self.SetBlockID2XSMap(xs_map);
+    },
+    R"(
+    Replace the block-id to cross-section map.
+
+    Parameters
+    ----------
+    xs_map: List[Dict]
+        A list of block-id to cross-section mapping dictionaries. Each dictionary supports:
+          - block_ids: List[int] (required)
+              Mesh block ids to associate with the cross section.
+          - xs: pyopensn.xs.MultiGroupXS (required)
+              Cross section object.
+    )"
   );
   lbs_problem.def(
     "SetAdjoint",
@@ -575,24 +587,96 @@ WrapLBS(py::module& slv)
         The total number of energy groups.
     groupsets : List[Dict], default=[]
         A list of input parameter blocks, each block provides the iterative properties for a
-        groupset.
+        groupset. Each dictionary supports:
+          - groups_from_to: List[int] (required)
+              Two-entry list with the first and last group id for the groupset, e.g. ``[0, 3]``.
+          - angular_quadrature: pyopensn.aquad.AngularQuadrature, optional
+              Handle to an angular quadrature.
+          - angle_aggregation_type: {'polar', 'single', 'azimuthal'}, default='polar'
+              Angle aggregation method to use during sweeping.
+          - angle_aggregation_num_subsets: int, default=1
+              Number of angle subsets used for aggregation.
+          - inner_linear_method: {'classic_richardson', 'petsc_richardson',
+            'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
+              Iterative method used for inner linear solves.
+          - l_abs_tol: float, default=1.0e-6
+              Inner linear solver absolute residual tolerance.
+          - l_max_its: int, default=200
+              Inner linear solver maximum iterations.
+          - gmres_restart_interval: int, default=30
+              GMRES restart interval, if GMRES is used.
+          - allow_cycles: bool, default=True
+              Whether cyclic dependencies are allowed in sweeps.
+          - apply_wgdsa: bool, default=False
+              Enable within-group DSA for this groupset.
+          - wgdsa_l_abs_tol: float, default=1.0e-4
+              WGDSA linear absolute tolerance.
+          - wgdsa_l_max_its: int, default=30
+              WGDSA maximum iterations.
+          - wgdsa_verbose: bool, default=False
+              Verbose WGDSA output.
+          - wgdsa_petsc_options: str, default=''
+              PETSc options string for the WGDSA solver.
+          - apply_tgdsa: bool, default=False
+              Enable two-grid DSA for this groupset.
+          - tgdsa_l_abs_tol: float, default=1.0e-4
+              TGDSA linear absolute tolerance.
+          - tgdsa_l_max_its: int, default=30
+              TGDSA maximum iterations.
+          - tgdsa_verbose: bool, default=False
+              Verbose TGDSA output.
+          - tgdsa_petsc_options: str, default=''
+              PETSc options string for the TGDSA solver.
     xs_map : List[Dict], default=[]
-        A list of mappings from block ids to cross-section definitions.
-    scattering_order: int, default=0
-        The level of harmonic expansion for the scattering source.
+        A list of mappings from block ids to cross-section definitions. Each dictionary supports:
+          - block_ids: List[int] (required)
+              Mesh block IDs to associate with the cross section.
+          - xs: pyopensn.xs.MultiGroupXS (required)
+              Cross-section object to assign to the specified blocks.
     boundary_conditions: List[Dict], default=[]
-        A list containing tables for each boundary specification.
+        A list containing tables for each boundary specification. Each dictionary supports:
+          - name: str (required)
+              Boundary name that identifies the specific boundary.
+          - type: {'vacuum', 'isotropic', 'reflecting', 'arbitrary'} (required)
+              Boundary type specification.
+          - group_strength: List[float], optional
+              Required when ``type='isotropic'``. Isotropic strength per group.
+          - function: AngularFluxFunction, optional
+              Required when ``type='arbitrary'``. Callable that returns incoming angular flux.
     point_sources: List[pyopensn.source.PointSource], default=[]
         A list of point sources.
     volumetric_sources: List[pyopensn.source.VolumetricSource], default=[]
         A list of volumetric sources.
     options : Dict, default={}
-        A block of optional configuration parameters. See `SetOptions` for available settings.
+        A block of optional configuration parameters. Each dictionary supports the same keys as
+        :meth:`LBSProblem.SetOptions`, including:
+          - max_mpi_message_size: int, default=32768
+          - restart_writes_enabled: bool, default=False
+          - write_delayed_psi_to_restart: bool, default=True
+          - read_restart_path: str, default=''
+          - write_restart_path: str, default=''
+          - write_restart_time_interval: int, default=0
+          - use_precursors: bool, default=False
+          - use_source_moments: bool, default=False
+          - save_angular_flux: bool, default=False
+          - verbose_inner_iterations: bool, default=True
+          - verbose_outer_iterations: bool, default=True
+          - max_ags_iterations: int, default=100
+          - ags_tolerance: float, default=1.0e-6
+          - ags_convergence_check: {'l2', 'pointwise'}, default='l2'
+          - verbose_ags_iterations: bool, default=True
+          - power_field_function_on: bool, default=False
+          - power_default_kappa: float, default=3.20435e-11
+          - power_normalization: float, default=-1.0
+          - field_function_prefix_option: {'prefix', 'solver_name'}, default='prefix'
+          - field_function_prefix: str, default=''
     sweep_type : str, default="AAH"
         The sweep type to use. Must be one of `AAH` or `CBC`. Defaults to `AAH`.
     use_gpus : bool, default=False
         A flag specifying whether GPU acceleration is used for the sweep. Currently, only ``AAH`` is
         supported.
+    time_dependent : bool, default=False
+        Enable time-dependent sweeps. Currently only supported with ``sweep_type="AAH"``.
     )"
   );
   do_problem.def(
@@ -613,29 +697,83 @@ WrapLBS(py::module& slv)
     )"
   );
   do_problem.def(
-    "ComputeBalance",
-    [](DiscreteOrdinatesProblem& self)
+    "SetBoundaryOptions",
+    [](DiscreteOrdinatesProblem& self, py::kwargs& params)
     {
-      ComputeBalance(self);
+      for (auto [key, value] : params)
+      {
+        auto c_key = key.cast<std::string>();
+        if (c_key == "clear_boundary_conditions")
+          self.ClearBoundaries();
+        else if (c_key == "boundary_conditions")
+        {
+          auto boundaries = value.cast<py::list>();
+          for (auto boundary : boundaries)
+          {
+            InputParameters input = DiscreteOrdinatesProblem::GetBoundaryOptionsBlock();
+            input.AssignParameters(pyobj_to_param_block("", boundary.cast<py::dict>()));
+            self.SetBoundaryOptions(input);
+          }
+        }
+        else
+          throw std::runtime_error("Invalid argument provided to SetBoundaryOptions.\n");
+      }
     },
     R"(
-    Compute and print particle balance for the problem.
+    Set or clear boundary conditions.
+
+    Parameters
+    ----------
+    clear_boundary_conditions: bool, default=False
+        If true, all current boundary conditions are deleted.
+    boundary_conditions: List[Dict]
+        A list of boundary condition dictionaries. Each dictionary supports:
+          - name: str (required)
+              Boundary name that identifies the specific boundary.
+          - type: {'vacuum', 'isotropic', 'reflecting', 'arbitrary'} (required)
+              Boundary type specification.
+          - group_strength: List[float], optional
+              Required when ``type='isotropic'``. Isotropic strength per group.
+          - function: AngularFluxFunction, optional
+              Required when ``type='arbitrary'``. Callable that returns incoming angular flux.
+    )"
+  );
+  do_problem.def(
+    "GetPsi",
+    [](DiscreteOrdinatesProblem& self)
+    {
+      const auto& psi = self.GetPsiNewLocal();
+      py::list psi_list;
+      for (const auto& vec : psi)
+      {
+        auto array = py::array_t<double>(static_cast<py::ssize_t>(vec.size()),
+                                         vec.data(),
+                                         py::cast(self));
+        psi_list.append(array);
+      }
+      return psi_list;
+    },
+    R"(
+    Return psi as a list of NumPy arrays (float64), using zero-copy views into the
+    underlying data.
     )"
   );
   do_problem.def(
     "ComputeLeakage",
     [](DiscreteOrdinatesProblem& self, py::list bnd_names)
     {
+      auto grid = self.GetGrid();
       // get the supported boundaries
-      std::map<std::string, std::uint64_t> allowed_bd_names = LBSProblem::supported_boundary_names;
-      std::map<std::uint64_t, std::string> allowed_bd_ids = LBSProblem::supported_boundary_ids;
-      // get the boundaries to parse
+      std::map<std::string, std::uint64_t> allowed_bd_names = grid->GetBoundaryNameMap();
+      std::map<std::uint64_t, std::string> allowed_bd_ids = grid->GetBoundaryIDMap();
+      // get the boundaries to parse, preserving user order
       std::vector<std::uint64_t> bndry_ids;
       if (bnd_names.size() > 1)
       {
         for (py::handle name : bnd_names)
         {
-          bndry_ids.push_back(allowed_bd_names.at(name.cast<std::string>()));
+          auto sname = name.cast<std::string>();
+          bndry_ids.push_back(allowed_bd_names.at(sname));
         }
       }
       else
@@ -646,14 +784,21 @@ WrapLBS(py::module& slv)
       std::map<std::uint64_t, std::vector<double>> leakage = ComputeLeakage(self, bndry_ids);
       // convert result to native Python
       py::dict result;
-      for (const auto& [bndry_id, gr_wise_leakage] : leakage)
+      for (const auto& bndry_id : bndry_ids)
       {
-        py::array_t<double> np_vector = py::array_t<double>(static_cast<long>(gr_wise_leakage.size()));
-        py::buffer_info buffer = np_vector.request();
+        const auto it = leakage.find(bndry_id);
+        if (it == leakage.end())
+          continue;
+        // construct numpy array and copy contents
+        const auto& grp_wise_leakage = it->second;
+        py::array_t<double> np_vector(py::ssize_t(grp_wise_leakage.size()));
+        auto buffer = np_vector.request();
         auto *np_vector_data = static_cast<double*>(buffer.ptr);
-        std::copy(gr_wise_leakage.begin(), gr_wise_leakage.end(), np_vector_data);
-        result[allowed_bd_ids.at(bndry_id).data()] = np_vector;
+        std::copy(grp_wise_leakage.begin(), grp_wise_leakage.end(), np_vector_data);
+        const std::string& name = allowed_bd_ids.at(bndry_id);
+        result[py::str(name)] = std::move(np_vector);
       }
+
       return result;
     },
     R"(
@@ -718,21 +863,92 @@ WrapLBS(py::module& slv)
         The total number of energy groups.
     groupsets : list of dict
         A list of input parameter blocks, each block provides the iterative properties for a
-        groupset.
+        groupset. Each dictionary supports:
+          - groups_from_to: List[int] (required)
+              Two-entry list with the first and last group id for the groupset, e.g. ``[0, 3]``.
+          - angular_quadrature: pyopensn.aquad.AngularQuadrature, optional
+              Handle to an angular quadrature.
+          - angle_aggregation_type: {'polar', 'single', 'azimuthal'}, default='polar'
+              Angle aggregation method to use during sweeping.
+          - angle_aggregation_num_subsets: int, default=1
+              Number of angle subsets used for aggregation.
+          - inner_linear_method: {'classic_richardson', 'petsc_richardson',
+            'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
+              Iterative method used for inner linear solves.
+          - l_abs_tol: float, default=1.0e-6
+              Inner linear solver absolute residual tolerance.
+          - l_max_its: int, default=200
+              Inner linear solver maximum iterations.
+          - gmres_restart_interval: int, default=30
+              GMRES restart interval, if GMRES is used.
+          - allow_cycles: bool, default=True
+              Whether cyclic dependencies are allowed in sweeps.
+          - apply_wgdsa: bool, default=False
+              Enable within-group DSA for this groupset.
+          - wgdsa_l_abs_tol: float, default=1.0e-4
+              WGDSA linear absolute tolerance.
+          - wgdsa_l_max_its: int, default=30
+              WGDSA maximum iterations.
+          - wgdsa_verbose: bool, default=False
+              Verbose WGDSA output.
+          - wgdsa_petsc_options: str, default=''
+              PETSc options string for the WGDSA solver.
+          - apply_tgdsa: bool, default=False
+              Enable two-grid DSA for this groupset.
+          - tgdsa_l_abs_tol: float, default=1.0e-4
+              TGDSA linear absolute tolerance.
+          - tgdsa_l_max_its: int, default=30
+              TGDSA maximum iterations.
+          - tgdsa_verbose: bool, default=False
+              Verbose TGDSA output.
+          - tgdsa_petsc_options: str, default=''
     xs_map : list of dict
-        A list of mappings from block ids to cross-section definitions.
-    scattering_order: int, default=0
-        The level of harmonic expansion for the scattering source.
+        A list of mappings from block ids to cross-section definitions. Each dictionary supports:
+          - block_ids: List[int] (required)
+              Mesh block IDs to associate with the cross section.
+          - xs: pyopensn.xs.MultiGroupXS (required)
+              Cross-section object to assign to the specified blocks.
     boundary_conditions: List[Dict], default=[]
-        A list containing tables for each boundary specification.
+        A list containing tables for each boundary specification. Each dictionary supports:
+          - name: str (required)
+              Boundary name that identifies the specific boundary.
+          - type: {'vacuum', 'isotropic', 'reflecting', 'arbitrary'} (required)
+              Boundary type specification.
+          - group_strength: List[float], optional
+              Required when ``type='isotropic'``. Isotropic strength per group.
+          - function: AngularFluxFunction, optional
+              Required when ``type='arbitrary'``. Callable that returns incoming angular flux.
     point_sources: List[pyopensn.source.PointSource], default=[]
         A list of point sources.
     volumetric_sources: List[pyopensn.source.VolumetricSource], default=[]
         A list of volumetric sources.
     options : dict, optional
-        A block of optional configuration parameters. See `SetOptions` for available settings.
+        A block of optional configuration parameters. Each dictionary supports the same keys as
+        :meth:`LBSProblem.SetOptions`, including:
+          - max_mpi_message_size: int, default=32768
+          - restart_writes_enabled: bool, default=False
+          - write_delayed_psi_to_restart: bool, default=True
+          - read_restart_path: str, default=''
+          - write_restart_path: str, default=''
+          - write_restart_time_interval: int, default=0
+          - use_precursors: bool, default=False
+          - use_source_moments: bool, default=False
+          - save_angular_flux: bool, default=False
+          - verbose_inner_iterations: bool, default=True
+          - verbose_outer_iterations: bool, default=True
+          - max_ags_iterations: int, default=100
+          - ags_tolerance: float, default=1.0e-6
+          - ags_convergence_check: {'l2', 'pointwise'}, default='l2'
+          - verbose_ags_iterations: bool, default=True
+          - power_field_function_on: bool, default=False
+          - power_default_kappa: float, default=3.20435e-11
+          - power_normalization: float, default=-1.0
+          - field_function_prefix_option: {'prefix', 'solver_name'}, default='prefix'
+          - field_function_prefix: str, default=''
     sweep_type : str, optional
         The sweep type to use. Must be one of `AAH` or `CBC`. Defaults to `AAH`.
+    time_dependent : bool, default=False
+        Enable time-dependent sweeps. Currently only supported with ``sweep_type="AAH"``.
     )"
   );
 }
@@ -769,6 +985,112 @@ WrapSteadyState(py::module& slv)
         Existing LBSProblem instance.
     )"
   );
+  // clang-format on
+}
+
+// Wrap time-dependent solver
+void
+WrapTimeDependent(py::module& slv)
+{
+  // clang-format off
+  auto time_dependent_solver =
+    py::class_<TimeDependentSourceSolver, std::shared_ptr<TimeDependentSourceSolver>, Solver>(
+      slv,
+      "TimeDependentSourceSolver",
+      R"(
+      Time dependent solver.
+
+      Wrapper of :cpp:class:`opensn::TimeDependentSourceSolver`.
+      )"
+    );
+  time_dependent_solver.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        return TimeDependentSourceSolver::Create(kwargs_to_param_block(params));
+      }
+    ),
+    R"(
+    Construct a time dependent solver.
+
+    Parameters
+    ----------
+    pyopensn.solver.LBSProblem : LBSProblem
+        Existing LBSProblem instance.
+    dt : float, optional, default=1.0
+        Time step size used during the simulation.
+    stop_time : float, optional, default=1.0
+        Simulation end time.
+    )"
+  );
+  time_dependent_solver.def(
+    "Advance",
+    &TimeDependentSourceSolver::Advance,
+    R"(
+    Advance the solver by a single timestep.
+
+    This method uses the configured `dt` and `theta` values and will return
+    immediately if the stop time has already been reached. Calling it
+    repeatedly allows users to write custom python time loops.
+    )");
+  time_dependent_solver.def(
+    "SetTimeStep",
+    &TimeDependentSourceSolver::SetTimeStep,
+    R"(
+    Set the timestep size used by :meth:`Advance`.
+
+    Parameters
+    ----------
+    dt : float
+        New timestep size.
+    )");
+  time_dependent_solver.def(
+    "SetTheta",
+    &TimeDependentSourceSolver::SetTheta,
+    R"(
+    Set the theta parameter used by :meth:`Advance`.
+
+    Parameters
+    ----------
+    theta : float
+        Theta value between 0 and 1.
+    )");
+  time_dependent_solver.def(
+    "SetPreAdvanceCallback",
+    static_cast<void (TimeDependentSourceSolver::*)(std::function<void()>)>(
+      &TimeDependentSourceSolver::SetPreAdvanceCallback),
+    R"(
+    Register a callback that runs before each call to :meth:`Advance`.
+
+    Parameters
+    ----------
+    callback : Optional[Callable[[], None]]
+        Function invoked before the solver advances a timestep. Pass None to clear.
+    )");
+  time_dependent_solver.def(
+    "SetPreAdvanceCallback",
+    static_cast<void (TimeDependentSourceSolver::*)(std::nullptr_t)>(
+      &TimeDependentSourceSolver::SetPreAdvanceCallback),
+    "Clear the PreAdvance callback by passing None.");
+  time_dependent_solver.def(
+    "SetPostAdvanceCallback",
+    static_cast<void (TimeDependentSourceSolver::*)(std::function<void()>)>(
+      &TimeDependentSourceSolver::SetPostAdvanceCallback),
+    R"(
+    Register a callback that runs after each call to :meth:`Advance`.
+
+    Parameters
+    ----------
+    callback : Optional[Callable[[], None]]
+        Function invoked after the solver advances a timestep. Pass None to clear.
+    )");
+  time_dependent_solver.def(
+    "SetPostAdvanceCallback",
+    static_cast<void (TimeDependentSourceSolver::*)(std::nullptr_t)>(
+      &TimeDependentSourceSolver::SetPostAdvanceCallback),
+    "Clear the PostAdvance callback by passing None.");
+  slv.attr("BackwardEuler") = 1.0;
+  slv.attr("CrankNicolson") = 0.5;
   // clang-format on
 }
 
@@ -1011,6 +1333,7 @@ py_solver(py::module& pyopensn)
   WrapSolver(slv);
   WrapLBS(slv);
   WrapSteadyState(slv);
+  WrapTimeDependent(slv);
   WrapNLKEigen(slv);
   WrapDiscreteOrdinatesKEigenAcceleration(slv);
   WrapPIteration(slv);

@@ -28,6 +28,7 @@ PyApp::PyApp(const mpi::Communicator& comm)
   py::exec("opensn_console = True");
 
   console.BindBarrier(comm);
+  console.BindAllReduce(comm);
 
   Console::BindModule(WrapYlm);
   Console::BindModule(WrapVector3);
@@ -37,7 +38,7 @@ PyApp::PyApp(const mpi::Communicator& comm)
   Console::BindModule(WrapQuadrature);
   Console::BindModule(WrapProductQuadrature);
   Console::BindModule(WrapCurvilinearProductQuadrature);
-  Console::BindModule(WrapSLDFESQuadrature);
+  Console::BindModule(WrapSLDFEsqQuadrature);
   Console::BindModule(WrapLebedevQuadrature);
 
   Console::BindModule(WrapMesh);
@@ -61,6 +62,7 @@ PyApp::PyApp(const mpi::Communicator& comm)
   Console::BindModule(WrapSolver);
   Console::BindModule(WrapLBS);
   Console::BindModule(WrapSteadyState);
+  Console::BindModule(WrapTimeDependent);
   Console::BindModule(WrapNLKEigen);
   Console::BindModule(WrapPIteration);
   Console::BindModule(WrapDiscreteOrdinatesKEigenAcceleration);

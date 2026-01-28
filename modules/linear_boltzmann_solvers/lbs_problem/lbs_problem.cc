@@ -15,6 +15,7 @@
 #include "framework/object_factory.h"
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
+#include "framework/data_types/allowable_range.h"
 #include "caliper/cali.h"
 #include <algorithm>
 #include <iomanip>
@@ -22,19 +23,14 @@
 #include <cstring>
 #include <cassert>
 #include <memory>
+#include <stdexcept>
 #include <sys/stat.h>
 
 namespace opensn
 {
 
-std::map<std::string, uint64_t> LBSProblem::supported_boundary_names = {
-  {"xmin", XMIN}, {"xmax", XMAX}, {"ymin", YMIN}, {"ymax", YMAX}, {"zmin", ZMIN}, {"zmax", ZMAX}};
-
-std::map<uint64_t, std::string> LBSProblem::supported_boundary_ids = {
-  {XMIN, "xmin"}, {XMAX, "xmax"}, {YMIN, "ymin"}, {YMAX, "ymax"}, {ZMIN, "zmin"}, {ZMAX, "zmax"}};
-
-LBSProblem::LBSProblem(const std::string& name, std::shared_ptr<MeshContinuum> grid)
-  : Problem(name), grid_(grid), use_gpus_(false)
+LBSProblem::LBSProblem(std::string name, std::shared_ptr<MeshContinuum> grid)
+  : Problem(std::move(name)), grid_(std::move(grid)), use_gpus_(false)
 {
 }
 
@@ -63,21 +59,20 @@ LBSProblem::GetInputParameters()
   params.AddOptionalParameterArray<std::shared_ptr<PointSource>>(
     "point_sources", {}, "An array of point sources.");
 
-  params.AddOptionalParameterArray(
-    "boundary_conditions", {}, "An array containing tables for each boundary specification.");
-  params.LinkParameterToBlock("boundary_conditions", "BoundaryOptionsBlock");
-
   params.AddOptionalParameterBlock(
     "options", ParameterBlock(), "Block of options. See <TT>OptionsBlock</TT>.");
   params.LinkParameterToBlock("options", "OptionsBlock");
 
   params.AddOptionalParameter("use_gpus", false, "Offload the sweep computation to GPUs.");
 
+  params.AddOptionalParameter(
+    "time_dependent", false, "Flag indicating whether the problem is time dependent.");
   return params;
 }
 
 LBSProblem::LBSProblem(const InputParameters& params)
   : Problem(params),
+    time_dependent_(params.GetParamValue<bool>("time_dependent")),
     num_groups_(params.GetParamValue<size_t>("num_groups")),
     grid_(params.GetSharedPtrParam<MeshContinuum>("mesh")),
     use_gpus_(params.GetParamValue<bool>("use_gpus"))
@@ -85,12 +80,15 @@ LBSProblem::LBSProblem(const InputParameters& params)
   // Check system for GPU acceleration
   if (use_gpus_)
   {
-#ifdef __OPENSN_USE_CUDA__
+    if (time_dependent_)
+      throw std::invalid_argument(GetName() +
+                                  ": Time dependent problems are not supported on GPUs.");
+#ifdef __OPENSN_WITH_GPU__
     CheckCapableDevices();
 #else
     throw std::invalid_argument(
-      GetName() + ": GPU support was requested, but OpenSn was built without CUDA enabled");
-#endif // __OPENSN_USE_CUDA__
+      GetName() + ": GPU support was requested, but OpenSn was built without CUDA enabled.");
+#endif // __OPENSN_WITH_GPU__
   }
 
   // Initialize options
@@ -102,28 +100,9 @@ LBSProblem::LBSProblem(const InputParameters& params)
   }
 
   // Set geometry type
-  const auto dim = grid_->GetDimension();
-  if (dim == 1)
-    options_.geometry_type = GeometryType::ONED_SLAB;
-  else if (dim == 2)
-    options_.geometry_type = GeometryType::TWOD_CARTESIAN;
-  else if (dim == 3)
-    options_.geometry_type = GeometryType::THREED_CARTESIAN;
-  else
-    OpenSnLogicalError("Cannot deduce geometry type from mesh.");
-
-  // Set boundary conditions
-  if (params.Has("boundary_conditions"))
-  {
-    const auto& bcs = params.GetParam("boundary_conditions");
-    bcs.RequireBlockTypeIs(ParameterBlockType::ARRAY);
-    for (size_t b = 0; b < bcs.GetNumParameters(); ++b)
-    {
-      auto bndry_params = GetBoundaryOptionsBlock();
-      bndry_params.AssignParameters(bcs.GetParam(b));
-      SetBoundaryOptions(bndry_params);
-    }
-  }
+  geometry_type_ = grid_->GetGeometryType();
+  if (geometry_type_ == GeometryType::INVALID)
+    throw std::runtime_error(GetName() + ": Invalid geometry type.");
 
   InitializeGroupsets(params);
   InitializeSources(params);
@@ -143,10 +122,80 @@ LBSProblem::GetOptions() const
   return options_;
 }
 
+double
+LBSProblem::GetTime() const
+{
+  return time_;
+}
+
+void
+LBSProblem::SetTime(double time)
+{
+  time_ = time;
+}
+
+void
+LBSProblem::SetTimeStep(double dt)
+{
+  if (dt <= 0.0)
+    throw std::runtime_error(GetName() + " dt must be greater than zero.");
+  dt_ = dt;
+}
+
+double
+LBSProblem::GetTimeStep() const
+{
+  return dt_;
+}
+
+bool
+LBSProblem::IsTimeDependent() const
+{
+  return time_dependent_;
+}
+
+void
+LBSProblem::SetTheta(double theta)
+{
+  if (theta < 0.0 or theta > 1.0)
+    throw std::runtime_error(GetName() + " theta must be between 0.0 and 1.0.");
+  theta_ = theta;
+}
+
+double
+LBSProblem::GetTheta() const
+{
+  return theta_;
+}
+
+GeometryType
+LBSProblem::GetGeometryType() const
+{
+  return geometry_type_;
+}
+
 size_t
 LBSProblem::GetNumMoments() const
 {
   return num_moments_;
+}
+
+unsigned int
+LBSProblem::GetMaxCellDOFCount() const
+{
+  return max_cell_dof_count_;
+}
+
+unsigned int
+LBSProblem::GetMinCellDOFCount() const
+{
+  return min_cell_dof_count_;
+}
+
+bool
+LBSProblem::UseGPUs() const
+{
+  return use_gpus_;
 }
 
 size_t
@@ -231,16 +280,19 @@ LBSProblem::GetVolumetricSources() const
   return volumetric_sources_;
 }
 
-void
-LBSProblem::ClearBoundaries()
-{
-  boundary_preferences_.clear();
-}
-
-const std::map<int, std::shared_ptr<MultiGroupXS>>&
-LBSProblem::GetMatID2XSMap() const
+const BlockID2XSMap&
+LBSProblem::GetBlockID2XSMap() const
 {
   return block_id_to_xs_map_;
+}
+
+void
+LBSProblem::SetBlockID2XSMap(const BlockID2XSMap& xs_map)
+{
+  block_id_to_xs_map_ = xs_map;
+  InitializeMaterials();
+  ResetGPUCarriers();
+  InitializeGPUExtras();
 }
 
 std::shared_ptr<MeshContinuum>
@@ -265,6 +317,12 @@ const std::map<uint64_t, UnitCellMatrices>&
 LBSProblem::GetUnitGhostCellMatrices() const
 {
   return unit_ghost_cell_matrices_;
+}
+
+std::vector<CellLBSView>&
+LBSProblem::GetCellTransportViews()
+{
+  return cell_transport_views_;
 }
 
 const std::vector<CellLBSView>&
@@ -391,12 +449,6 @@ LBSProblem::GetWGSContext(int groupset_id)
   return *wgs_context_ptr;
 }
 
-std::map<uint64_t, BoundaryPreference>&
-LBSProblem::GetBoundaryPreferences()
-{
-  return boundary_preferences_;
-}
-
 std::pair<size_t, size_t>
 LBSProblem::GetNumPhiIterativeUnknowns()
 {
@@ -508,29 +560,6 @@ LBSProblem::GetOptionsBlock()
 }
 
 InputParameters
-LBSProblem::GetBoundaryOptionsBlock()
-{
-  InputParameters params;
-
-  params.SetGeneralDescription("Set options for boundary conditions.");
-  params.AddRequiredParameter<std::string>("name",
-                                           "Boundary name that identifies the specific boundary");
-  params.AddRequiredParameter<std::string>("type", "Boundary type specification.");
-  params.AddOptionalParameterArray<double>("group_strength",
-                                           {},
-                                           "Required only if \"type\" is \"isotropic\". An array "
-                                           "of isotropic strength per group");
-  params.AddOptionalParameter(
-    "function_name", "", "Text name of the function to be called for this boundary condition.");
-  params.ConstrainParameterRange(
-    "name", AllowableRangeList::New({"xmin", "xmax", "ymin", "ymax", "zmin", "zmax"}));
-  params.ConstrainParameterRange("type",
-                                 AllowableRangeList::New({"vacuum", "isotropic", "reflecting"}));
-
-  return params;
-}
-
-InputParameters
 LBSProblem::GetXSMapEntryBlock()
 {
   InputParameters params;
@@ -624,6 +653,10 @@ LBSProblem::SetOptions(const InputParameters& input)
 
     else if (spec.GetName() == "field_function_prefix")
       options_.field_function_prefix = spec.GetValue<std::string>();
+
+    else if (spec.GetName() == "adjoint")
+      options_.adjoint = spec.GetValue<bool>();
+
   } // for p
 
   if (options_.restart_writes_enabled)
@@ -648,47 +681,6 @@ LBSProblem::SetOptions(const InputParameters& input)
 }
 
 void
-LBSProblem::SetBoundaryOptions(const InputParameters& params)
-{
-  const auto boundary_name = params.GetParamValue<std::string>("name");
-  const auto bndry_type = params.GetParamValue<std::string>("type");
-
-  const auto bid = supported_boundary_names.at(boundary_name);
-  const std::map<std::string, LBSBoundaryType> type_list = {
-    {"vacuum", LBSBoundaryType::VACUUM},
-    {"isotropic", LBSBoundaryType::ISOTROPIC},
-    {"reflecting", LBSBoundaryType::REFLECTING}};
-
-  const auto type = type_list.at(bndry_type);
-  switch (type)
-  {
-    case LBSBoundaryType::VACUUM:
-    case LBSBoundaryType::REFLECTING:
-    {
-      boundary_preferences_[bid] = {type};
-      break;
-    }
-    case LBSBoundaryType::ISOTROPIC:
-    {
-      OpenSnInvalidArgumentIf(not params.Has("group_strength"),
-                              "Boundary conditions with type=\"isotropic\" require parameter "
-                              "\"group_strength\"");
-
-      params.RequireParameterBlockTypeIs("group_strength", ParameterBlockType::ARRAY);
-      const auto group_strength = params.GetParamVectorValue<double>("group_strength");
-      boundary_preferences_[bid] = {type, group_strength};
-      break;
-    }
-    case LBSBoundaryType::ARBITRARY:
-    {
-      throw std::runtime_error(GetName() +
-                               ": Arbitrary boundary conditions are not currently supported");
-      break;
-    }
-  }
-}
-
-void
 LBSProblem::Initialize()
 {
   CALI_CXX_MARK_SCOPE("LBSProblem::Initialize");
@@ -700,7 +692,7 @@ LBSProblem::Initialize()
   InitializeParrays();
   InitializeBoundaries();
   InitializeGPUExtras();
-  SetAdjoint(false);
+  SetAdjoint(options_.adjoint);
 
   // Initialize point sources
   for (auto& point_source : point_sources_)
@@ -808,7 +800,7 @@ LBSProblem::InitializeXSmapAndDensities(const InputParameters& params)
 
     const auto& block_ids_param = xs_entry_pars.GetParam("block_ids");
     block_ids_param.RequireBlockTypeIs(ParameterBlockType::ARRAY);
-    const auto& block_ids = block_ids_param.GetVectorValue<int>();
+    const auto& block_ids = block_ids_param.GetVectorValue<unsigned int>();
     auto xs = xs_entry_pars.GetSharedPtrParam<MultiGroupXS>("xs");
     for (const auto& block_id : block_ids)
       block_id_to_xs_map_[block_id] = xs;
@@ -827,11 +819,12 @@ LBSProblem::InitializeMaterials()
 
   // Create set of material ids locally relevant
   int invalid_mat_cell_count = 0;
-  std::set<int> unique_block_ids;
+  std::set<unsigned int> unique_block_ids;
   for (auto& cell : grid_->local_cells)
   {
     unique_block_ids.insert(cell.block_id);
-    if (cell.block_id < 0 or (block_id_to_xs_map_.find(cell.block_id) == block_id_to_xs_map_.end()))
+    if (cell.block_id == std::numeric_limits<unsigned int>::max() or
+        (block_id_to_xs_map_.find(cell.block_id) == block_id_to_xs_map_.end()))
       ++invalid_mat_cell_count;
   }
   const auto& ghost_cell_ids = grid_->cells.GetGhostGlobalIDs();
@@ -839,7 +832,8 @@ LBSProblem::InitializeMaterials()
   {
     const auto& cell = grid_->cells[cell_id];
     unique_block_ids.insert(cell.block_id);
-    if (cell.block_id < 0 or (block_id_to_xs_map_.find(cell.block_id) == block_id_to_xs_map_.end()))
+    if (cell.block_id == std::numeric_limits<unsigned int>::max() or
+        (block_id_to_xs_map_.find(cell.block_id) == block_id_to_xs_map_.end()))
       ++invalid_mat_cell_count;
   }
   OpenSnLogicalErrorIf(invalid_mat_cell_count > 0,
@@ -865,8 +859,7 @@ LBSProblem::InitializeMaterials()
   {
     const auto& xs = mat_id_xs.second;
     num_precursors_ += xs->GetNumPrecursors();
-    if (xs->GetNumPrecursors() > max_precursors_per_material_)
-      max_precursors_per_material_ = xs->GetNumPrecursors();
+    max_precursors_per_material_ = std::max(xs->GetNumPrecursors(), max_precursors_per_material_);
   }
 
   // if no precursors, turn off precursors
@@ -998,7 +991,7 @@ LBSProblem::InitializeParrays()
   const Vector3 jhat(0.0, 1.0, 0.0);
   const Vector3 khat(0.0, 0.0, 1.0);
 
-  min_cell_dof_count_ = static_cast<size_t>(-1);
+  min_cell_dof_count_ = std::numeric_limits<unsigned int>::max();
   max_cell_dof_count_ = 0;
   cell_transport_views_.clear();
   cell_transport_views_.reserve(grid_->local_cells.size());
@@ -1024,26 +1017,7 @@ LBSProblem::InitializeParrays()
     {
       if (not face.has_neighbor)
       {
-        Vector3& n = face.normal;
-
-        int boundary_id = -1;
-        if (n.Dot(ihat) < -0.999)
-          boundary_id = XMIN;
-        else if (n.Dot(ihat) > 0.999)
-          boundary_id = XMAX;
-        else if (n.Dot(jhat) < -0.999)
-          boundary_id = YMIN;
-        else if (n.Dot(jhat) > 0.999)
-          boundary_id = YMAX;
-        else if (n.Dot(khat) < -0.999)
-          boundary_id = ZMIN;
-        else if (n.Dot(khat) > 0.999)
-          boundary_id = ZMAX;
-
-        if (boundary_id >= 0)
-          face.neighbor_id = boundary_id;
         cell_on_boundary = true;
-
         face_local_flags[f] = false;
         face_locality[f] = -1;
       } // if bndry
@@ -1058,8 +1032,8 @@ LBSProblem::InitializeParrays()
       ++f;
     } // for f
 
-    max_cell_dof_count_ = std::max(max_cell_dof_count_, num_nodes);
-    min_cell_dof_count_ = std::min(min_cell_dof_count_, num_nodes);
+    max_cell_dof_count_ = std::max(max_cell_dof_count_, static_cast<unsigned int>(num_nodes));
+    min_cell_dof_count_ = std::min(min_cell_dof_count_, static_cast<unsigned int>(num_nodes));
     cell_transport_views_.emplace_back(cell_phi_address,
                                        num_nodes,
                                        num_grps,
@@ -1137,10 +1111,10 @@ LBSProblem::InitializeFieldFunctions()
       if (options_.field_function_prefix_option == "solver_name")
         prefix = GetName() + "_";
 
-      char buff[100];
-      snprintf(
-        buff, 99, "%sphi_g%03d_m%02d", prefix.c_str(), static_cast<int>(g), static_cast<int>(m));
-      const std::string name = std::string(buff);
+      std::ostringstream oss;
+      oss << prefix << "phi_g" << std::setw(3) << std::setfill('0') << static_cast<int>(g) << "_m"
+          << std::setw(2) << std::setfill('0') << static_cast<int>(m);
+      const std::string name = oss.str();
 
       auto group_ff = std::make_shared<FieldFunctionGridBased>(
         name, discretization_, Unknown(UnknownType::SCALAR));
@@ -1198,7 +1172,7 @@ LBSProblem::InitializeSolverSchemes()
   ags_solver_->SetTolerance(options_.ags_tolerance);
 }
 
-#ifndef __OPENSN_USE_CUDA__
+#ifndef __OPENSN_WITH_GPU__
 void
 LBSProblem::InitializeGPUExtras()
 {
@@ -1213,7 +1187,7 @@ void
 LBSProblem::CheckCapableDevices()
 {
 }
-#endif // __OPENSN_USE_CUDA__
+#endif // __OPENSN_WITH_GPU__
 
 std::vector<double>
 LBSProblem::MakeSourceMomentsFromPhi()
@@ -1269,10 +1243,10 @@ LBSProblem::UpdateFieldFunctions()
     ff_ptr->UpdateFieldVector(data_vector_local);
   }
 
-  // Update power generation
+  // Update power generation and scalar flux
   if (options_.power_field_function_on)
   {
-    std::vector<double> data_vector_local(local_node_count_, 0.0);
+    std::vector<double> data_vector_power_local(local_node_count_, 0.0);
 
     double local_total_power = 0.0;
     for (const auto& cell : grid_->local_cells)
@@ -1302,24 +1276,38 @@ LBSProblem::UpdateFieldFunctions()
           nodal_power += kappa_g * sigma_fg * phi_new_local_[imapB + g];
         } // for g
 
-        data_vector_local[imapA] = nodal_power;
+        data_vector_power_local[imapA] = nodal_power;
         local_total_power += nodal_power * Vi(i);
       } // for node
     } // for cell
 
+    double scale_factor = 1.0;
     if (options_.power_normalization > 0.0)
     {
       double global_total_power = 0.0;
       mpi_comm.all_reduce(local_total_power, global_total_power, mpi::op::sum<double>());
-
-      Scale(data_vector_local, options_.power_normalization / global_total_power);
+      scale_factor = options_.power_normalization / global_total_power;
+      Scale(data_vector_power_local, scale_factor);
     }
 
     const size_t ff_index = power_gen_fieldfunc_local_handle_;
 
     auto& ff_ptr = field_functions_.at(ff_index);
-    ff_ptr->UpdateFieldVector(data_vector_local);
+    ff_ptr->UpdateFieldVector(data_vector_power_local);
 
+    // scale scalar flux if neccessary
+    if (scale_factor != 1.0)
+    {
+      for (size_t g = 0; g < groups_.size(); ++g)
+      {
+        const size_t phi_ff_index = phi_field_functions_local_map_.at({g, size_t{0}});
+        auto& phi_ff_ptr = field_functions_.at(phi_ff_index);
+        const auto& phi_vec = phi_ff_ptr->GetLocalFieldVector();
+        std::vector<double> phi_scaled(phi_vec.begin(), phi_vec.end());
+        Scale(phi_scaled, scale_factor);
+        phi_ff_ptr->UpdateFieldVector(phi_scaled);
+      }
+    }
   } // if power enabled
 }
 
@@ -1378,6 +1366,9 @@ LBSProblem::~LBSProblem()
 void
 LBSProblem::SetAdjoint(bool adjoint)
 {
+  if (adjoint and time_dependent_)
+    throw std::invalid_argument(GetName() + ": Time-dependent adjoint problems are not supported.");
+
   if (adjoint != options_.adjoint)
   {
     options_.adjoint = adjoint;
@@ -1396,7 +1387,7 @@ LBSProblem::SetAdjoint(bool adjoint)
       // should be cleared and reset through options upon changing modes.
       point_sources_.clear();
       volumetric_sources_.clear();
-      boundary_preferences_.clear();
+      ClearBoundaries();
 
       // Set all solutions to zero.
       phi_old_local_.assign(phi_old_local_.size(), 0.0);

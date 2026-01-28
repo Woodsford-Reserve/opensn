@@ -39,8 +39,10 @@ most prominent features of OpenSn include:
 .. admonition:: Recommended publication for citing
    :class: tip
 
-   Auhtors, "`OpenSn: title <https://doi.org/>`_,"
-   *journal*, **volume**, page--page (year).
+    David Andrs, Zachary Hardy, Daryl Hawkins, Jim Morel, Dinh Quoc Dang Nguyen, Jean Ragusa,
+    "`OpenSn: A Massively Parallel, Open-Source Simulation Environment for Discrete Ordinates Radiation Transport
+    <https://doi.org/10.1016/j.cpc.2025.110001>`_,"
+    *Computer Physics Communications*, **320**, 110001 (2026).
 
 .. only:: html
 
@@ -52,6 +54,7 @@ most prominent features of OpenSn include:
    :maxdepth: 2
 
    install/index
+   user_guide/index
    theory/index
    tutorials/index
    capi/rst/index

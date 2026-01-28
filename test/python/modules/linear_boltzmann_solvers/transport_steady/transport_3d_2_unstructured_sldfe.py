@@ -19,7 +19,7 @@ if "opensn_console" not in globals():
     from pyopensn.logvol import RPPLogicalVolume
     from pyopensn.xs import MultiGroupXS
     from pyopensn.source import VolumetricSource
-    from pyopensn.aquad import SLDFESQuadrature
+    from pyopensn.aquad import SLDFEsqQuadrature3DXYZ
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver
     from pyopensn.fieldfunc import FieldFunctionInterpolationVolume
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     meshgen = ExtruderMeshGenerator(
         inputs=[
             FromFileMeshGenerator(
-                filename="../../../../assets/mesh/TriangleMesh2x2Cuts.obj"
+                filename="../../../../assets/mesh/triangle_mesh2x2_cuts.obj"
             )
         ],
         layers=[
@@ -50,6 +50,7 @@ if __name__ == "__main__":
         )
     )
     grid = meshgen.Execute()
+    grid.SetOrthogonalBoundaries()
 
     # Set block IDs using logical volumes
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
@@ -68,7 +69,7 @@ if __name__ == "__main__":
     mg_src2 = VolumetricSource(block_ids=[2], group_strength=strength)
 
     # Angular quadrature
-    quad = SLDFESQuadrature(level=0, scattering_order=1)
+    quad = SLDFEsqQuadrature3DXYZ(level=0, scattering_order=1)
 
     # Set up the boundary source.
     bsrc = [0.0 for _ in range(num_groups)]
@@ -92,7 +93,6 @@ if __name__ == "__main__":
         xs_map=[
             {"block_ids": [0, 1], "xs": xs_graphite},
         ],
-        scattering_order=1,
         volumetric_sources=[mg_src1, mg_src2],
         boundary_conditions=[
             {"name": "zmin", "type": "isotropic", "group_strength": bsrc},
