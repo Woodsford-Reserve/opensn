@@ -12,6 +12,7 @@
 #include "framework/data_types/dense_matrix.h"
 #include "framework/data_types/vector.h"
 #include "framework/data_types/vector3.h"
+#include "hdf5.h"
 
 namespace opensn
 {
@@ -39,6 +40,10 @@ protected:
   void PrintSimHeader() override;
 
   void InitializeSpatialDiscretization() override;
+
+  void ClearBoundaries() override {}
+
+  void SetBoundaryOptions(const InputParameters& params) override {}
 
   static Vector3 ComputeOmega(const Vector3& point0,
                               const Vector3& point1)
@@ -75,6 +80,21 @@ protected:
 
   void Execute();
 
+  void UpdateBalance(const PointSource* point_source);
+  
+  void WriteToH5File(hid_t file,
+                     const Vector3& pt_loc);
+
+  void OverwriteH5Data(hid_t file,
+                       const std::string name,
+                       const std::vector<double>& data);
+
+  void ComputeMoment(unsigned int ell, 
+                     int m,
+                     const Vector3& pt_loc);
+
+  void FinalizeBalance(hid_t file);
+
   /// Near source region logical volumes.
   std::vector<std::shared_ptr<LogicalVolume>> near_source_logvols_;
   /// Cell face orientations for the cells in the local cell graph.
@@ -90,6 +110,13 @@ protected:
   std::vector<Vector<double>> Phi_;
 
   std::vector<double> destination_phi_;
+
+  unsigned int scattering_order_ = 0;
+  std::vector<double> flux_moment_;
+
+  double production_ = 0.;
+  double removal_ = 0.;
+  double out_flow_ = 0.;
 
 public:
   static InputParameters GetInputParameters();

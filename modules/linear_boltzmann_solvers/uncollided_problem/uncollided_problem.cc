@@ -7,10 +7,12 @@
 #include "framework/math/spatial_discretization/cell_mappings/cell_mapping.h"
 #include "framework/math/spatial_weight_function.h"
 #include "framework/math/quadratures/quadrature_order.h"
+#include "framework/math/quadratures/angular/legendre_poly/legendrepoly.h"
 #include "framework/logging/log.h"
 #include "framework/logging/log_exceptions.h"
 #include "framework/utils/timer.h"
 #include "framework/utils/utils.h"
+#include "framework/utils/hdf_utils.h"
 #include "framework/object_factory.h"
 #include "framework/runtime.h"
 #include "caliper/cali.h"
@@ -18,6 +20,7 @@
 #include <iomanip>
 #include <utility>
 #include <unordered_map>
+#include <cmath>
 
 namespace opensn
 {
@@ -42,6 +45,10 @@ UncollidedProblem::GetInputParameters()
   params.AddRequiredParameterArray("near_source",
                                    "List of near source region logical volumes.");
 
+  params.AddOptionalParameter("scattering_order",
+                              0,
+                              "The scattering order of collided flux problem.");
+
   return params;
 }
 
@@ -54,7 +61,8 @@ UncollidedProblem::Create(const ParameterBlock& params)
 
 
 UncollidedProblem::UncollidedProblem(const InputParameters& params)
-  : LBSProblem(params)
+  : LBSProblem(params),
+    scattering_order_(params.GetParamValue<size_t>("scattering_order"))
 {
   Initialize();
 
@@ -196,13 +204,23 @@ UncollidedProblem::Execute()
 {
   CALI_CXX_MARK_SCOPE("UncollidedProblem::Execute");
 
+  // Create h5 file
+  std::string fname = "uncollided.h5";
+  auto file = H5Fcreate(fname.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+
   size_t num_loc_cells = grid_->local_cells.size();
 
   size_t num_loc_nodes = discretization_->GetNumLocalNodes();
   size_t num_loc_unknowns = num_loc_nodes * num_groups_;
 
+  // Global cell IDs
+  std::vector<size_t> global_ids(num_loc_cells);
+  for (const auto& cell : grid_->local_cells) global_ids[cell.local_id] = cell.global_id;
+  H5WriteDataset1D<size_t>(file, "cell ids", global_ids);
+
   // Loop over point sources
-  for (size_t i = 0; i < GetPointSources().size(); ++i) {
+  for (size_t i = 0; i < GetPointSources().size(); ++i) 
+  {
     const auto& point_source = point_sources_[i];
     const auto pt = point_source.get();
 
@@ -212,8 +230,9 @@ UncollidedProblem::Execute()
       throw std::runtime_error("One or more point sources is outside "
                                "its near-source region.");
 
-    // Initialize uncollided flux
+    // Initialize uncollided flux and moment vector
     destination_phi_.assign(num_loc_unknowns, 0.);
+    flux_moment_.assign(num_loc_unknowns, 0.);
 
     // Populate uncollided cell relationships
     std::vector<std::set<std::pair<size_t, double>>> cell_successors(num_loc_cells);
@@ -249,23 +268,18 @@ UncollidedProblem::Execute()
     RaytraceNearSourceRegion(pt);
     SweepBulkRegion(pt_loc);
 
+    // Update balance parameters
+    UpdateBalance(pt);
 
-    const auto& sdm = *discretization_;
-
-    for (size_t c = 0; c < num_loc_cells; ++c)
-    {
-      const Cell& cell = grid_->local_cells[c];
-      size_t cell_num_nodes = cell.vertex_ids.size();
-
-      double phi_avg = 0.;
-      for (size_t i = 0; i < cell_num_nodes; ++i)
-      {
-        const auto ir = sdm.MapDOFLocal(cell, i);
-        phi_avg += destination_phi_[ir] / cell_num_nodes;
-      }
-      std::cout << phi_avg << std::endl;
-    }
+    // Write uncollided flux to h5
+    WriteToH5File(file, pt_loc);
   }
+
+  // Finalize balance calculation
+  FinalizeBalance(file);
+
+  // Close h5 file
+  H5Fclose(file);
 }
 
 
@@ -390,6 +404,10 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
     // Transport view
     const auto& transport_view = cell_transport_views_[c];
     const auto& xs = transport_view.GetXS();
+    const auto& sigma_t = xs.GetSigmaTotal();
+
+    const auto& fe_intgrl_values = unit_cell_matrices_[cell.local_id];
+    const auto& IntV_shapeI = fe_intgrl_values.intV_shapeI;
 
     // Enforce conservation
     std::vector<double> source(num_groups_, 0.);
@@ -412,12 +430,10 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
     // Removal rate in cell
     for (size_t g = 0; g < num_groups_; ++g)
     {
-      double phi_avg = 0.;
-      for (double phi_val : Phi_[g]) phi_avg += phi_val;
-      phi_avg /= cell_num_nodes;
-
-      double total_xs = densities_local_[c] * xs.GetSigmaTotal()[g];
-      sink[g] += total_xs * phi_avg * cell.volume;
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+      {
+        sink[g] += sigma_t[g] * Phi_[g](i) * IntV_shapeI(i);
+      }
     }
 
     // Leakage through faces
@@ -512,12 +528,10 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
 
     const auto& transport_view = cell_transport_views_[cell_id];
     const auto& xs = transport_view.GetXS();
+    const auto& sigma_t = xs.GetSigmaTotal();
 
-    for (size_t g = 0; g < num_groups_; ++g) 
-    {
-      double total_xs = densities_local_[cell.local_id] * xs.GetSigmaTotal()[g];
-      mfp[g] += total_xs * length;
-    }
+    for (size_t g = 0; g < num_groups_; ++g)
+      mfp[g] += sigma_t[g] * length;
   }
 
   for(size_t g = 0; g < num_groups_; ++g) 
@@ -553,6 +567,7 @@ UncollidedProblem::SweepBulkRegion(const Vector3& pt_loc)
 
     const auto& transport_view = cell_transport_views_[c];
     const auto& xs = transport_view.GetXS();
+    const auto& sigma_t = xs.GetSigmaTotal();
 
     // Compute matrices
     matrices = ComputeUncollidedIntegrals(cell, pt_loc);
@@ -631,11 +646,9 @@ UncollidedProblem::SweepBulkRegion(const Vector3& pt_loc)
 
     for (size_t g = 0; g < num_groups_; ++g)
     {
-      double total_xs = densities_local_[c] * xs.GetSigmaTotal()[g];
-
       for (size_t i = 0; i < cell_num_nodes; ++i)
         for (size_t j = 0; j < cell_num_nodes; ++j)
-          Atemp(i, j) = Amat(i, j) + total_xs * M_(i, j);
+          Atemp(i, j) = Amat(i, j) + sigma_t[g] * M_(i, j);
 
       // Solve system
       GaussElimination(Atemp, Phi_[g], static_cast<int>(cell_num_nodes));
@@ -684,6 +697,7 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
           fe_vol_data.ShapeValue(j, qp) * 
           omega.Dot( fe_vol_data.ShapeGrad(i, qp) ) * 
           fe_vol_data.JxW(qp);
+
       } // for qp
     } // for j
   } // for i
@@ -706,8 +720,10 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
           IntS_omega_n_shapeI_shapeJ[f](i,j) +=
             (*swf)(qp_xyz) *
             omega.Dot( cell.faces[f].normal ) *
+            fe_srf_data.ShapeValue(i, qp) *
             fe_srf_data.ShapeValue(j, qp) * 
             fe_srf_data.JxW(qp);
+
         } // for qp
       } // for j
     } // for i
@@ -715,6 +731,219 @@ UncollidedProblem::ComputeUncollidedIntegrals(const Cell& cell,
 
   return UncollidedMatrices{ IntV_shapeJ_omega_gradshapeI,
                              IntS_omega_n_shapeI_shapeJ };
+}
+
+
+void 
+UncollidedProblem::UpdateBalance(const PointSource* point_source)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::UpdateBalance");
+
+  const auto& sdm = *discretization_;
+
+  // Point source data
+  const Vector3& pt_loc = point_source->GetLocation();
+  const std::vector<double>& strength = point_source->GetStrength();
+
+  // Source rate
+  for (size_t g = 0; g < num_groups_; ++g) 
+    production_ += strength[g];
+
+  for (const auto& cell : grid_->local_cells) 
+  {
+    const uint64_t c = cell.local_id;
+
+    // Cell mapping
+    auto coord_sys = grid_->GetCoordinateSystem();
+    auto swf = SpatialWeightFunction::FromCoordinateType(coord_sys);
+    const auto& cell_mapping = sdm.GetCellMapping(cell);
+    const size_t cell_num_faces = cell.faces.size();
+    const size_t cell_num_nodes = cell_mapping.GetNumNodes();
+    const auto fe_vol_data = cell_mapping.MakeVolumetricFiniteElementData();
+
+    // Transport view
+    const auto& transport_view = cell_transport_views_[c];
+    const auto& xs = transport_view.GetXS();
+    const auto& sigma_t = xs.GetSigmaTotal();
+
+    const auto& fe_intgrl_values = unit_cell_matrices_[c];
+    const auto& IntV_shapeI = fe_intgrl_values.intV_shapeI;
+
+    // Removal rate in cell
+    for (size_t g = 0; g < num_groups_; ++g)
+    {
+      double phi_g = 0.;
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+      {
+        const auto ir = sdm.MapDOFLocal(cell, i);
+        double phi_ig = destination_phi_[ir + g];
+
+        removal_ += sigma_t[g] * phi_ig * IntV_shapeI(i);
+      }
+    }
+
+    // Compute outflow
+    for (size_t f = 0; f < cell_num_faces; ++f) 
+    {
+      const auto& face = cell.faces[f];
+
+      // Compute leakage out of outgoing face
+      if (not face.has_neighbor)
+      { 
+        // Face data
+        const Vector3& normal = cell.faces[f].normal;
+        const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
+        
+        for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+        {
+          // Raytrace to point
+          Vector3 qp_xyz = fe_srf_data.QPointXYZ(qp);
+          Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
+
+          // Compute outflow
+          double integrand = (*swf)(fe_srf_data.QPointXYZ(qp))
+                           * omega.Dot(normal) 
+                           * fe_srf_data.JxW(qp);
+          
+          for (size_t g = 0; g < num_groups_; ++g)
+          {
+            // Flux at quadrature point
+            for (size_t i = 0; i < cell_num_nodes; ++i)
+            {
+              const auto ir = sdm.MapDOFLocal(cell, i);
+              double phi_ig = destination_phi_[ir + g];
+
+              out_flow_ += phi_ig * integrand 
+                         * fe_srf_data.ShapeValue(i, qp); 
+            }
+          } // for g
+        } // for qp 
+      } // if not has_neighbor
+    } // for f
+  } // for cell
+}
+
+
+void 
+UncollidedProblem::WriteToH5File(hid_t file,
+                                 const Vector3& pt_loc)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::WriteToH5File");
+
+  // Write uncollided flux data to h5
+  if (H5Lexists(file, "0,0", H5P_DEFAULT) > 0)
+    OverwriteH5Data(file, "0,0", destination_phi_);
+
+  else H5WriteDataset1D<double>(file, "0,0", destination_phi_);
+
+  // Loop over moments
+  for (int ell = 1; ell <= scattering_order_; ++ell)
+  {
+    for (int m = -ell; m <= ell; ++m)
+    {
+      std::string name = std::to_string(ell) 
+                       + ","
+                       + std::to_string(m);
+
+      // Compute l,m harmonic moment of uncollided flux
+      ComputeMoment(ell, m, pt_loc);
+
+      // Write flux moment to h5
+      if (H5Lexists(file, name.c_str(), H5P_DEFAULT) > 0)
+        OverwriteH5Data(file, name, flux_moment_);
+
+      else H5WriteDataset1D<double>(file, name, flux_moment_);
+    }
+  }
+}
+
+
+void
+UncollidedProblem::OverwriteH5Data(hid_t file,
+                                   const std::string name,
+                                   const std::vector<double>& data)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::OverwriteH5Data");
+
+  // Read data from H5 file
+  std::vector<double> data_tmp;
+  H5ReadDataset1D<double>(file, name, data_tmp);
+
+  // Add data values
+  for (size_t i = 0; i < data_tmp.size(); ++i) data_tmp[i] += data[i];
+
+  // Overwrite data in H5 file
+  H5Ldelete(file, name.c_str(), H5P_DEFAULT);
+  H5WriteDataset1D<double>(file, name, data_tmp);
+}
+
+
+void 
+UncollidedProblem::ComputeMoment(unsigned int ell, 
+                                 int m,
+                                 const Vector3& pt_loc)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::ComputeMoment");
+
+  const auto& sdm = *discretization_;
+
+  for (const auto& cell : grid_->local_cells) 
+  {
+    const auto& cell_mapping = sdm.GetCellMapping(cell);
+    const size_t cell_num_nodes = cell_mapping.GetNumNodes();
+
+    for (size_t i = 0; i < cell_num_nodes; ++i)
+    {
+      // DOF vertex position
+      size_t vertex_id = cell.vertex_ids[i];
+      const auto& vertex = grid_->vertices[vertex_id];
+
+      // Vertex direction vector
+      Vector3 omega = ComputeOmega(pt_loc, vertex);
+
+      double theta = std::acos(omega.z);
+
+      double sgn = (omega.y > 0.) ? 1. : -1.; 
+      double varphi = sgn * std::acos(omega.x 
+                    / std::sqrt(omega.x*omega.x 
+                              + omega.y*omega.y));
+
+      // Compute l,m harmonic moment of uncollided flux
+      for (size_t g = 0; g < num_groups_; ++g)
+      {
+        const auto ir = sdm.MapDOFLocal(cell, i);
+        double phi_ig = destination_phi_[ir + g];
+
+        double phi_lm = phi_ig * Ylm(ell, m, varphi, theta);
+        flux_moment_[ir + g] = phi_lm;
+
+      } // for g
+    } // for i
+  } // for cell
+}
+
+
+void 
+UncollidedProblem::FinalizeBalance(hid_t file)
+{
+  CALI_CXX_MARK_SCOPE("UncollidedProblem::FinalizeBalance");
+
+  // Finalize balance calulation
+  double balance = production_ - (removal_ + out_flow_);
+  const double conservation_error = (production_ == 0.0) ? 0.0 : (balance / production_);
+
+  log.Log() << "\nBalance table:\n"
+            << std::setprecision(6) << std::scientific
+            << " Removal rate                = " << removal_ << "\n"
+            << " Production rate             = " << production_ << "\n"
+            << " Out-flow rate               = " << out_flow_ << "\n"
+            << " Balance (Production - Loss) = " << balance << "\n"
+            << " Conservation error          = " << conservation_error << "\n\n";
+
+  // Write balance parameters to h5
+  H5CreateAttribute<double>(file, "production", production_);
+  H5CreateAttribute<double>(file, "removal", removal_);
+  H5CreateAttribute<double>(file, "out-flow", out_flow_);
 }
 
 } // namespace opensn

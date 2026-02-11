@@ -549,6 +549,8 @@ WrapLBS(py::module& slv)
         A list of point sources.
     near_source: List[pyopensn.logvol.LogicalVolume], default=[]
         A list of near source region logical volumes.
+    scattering_order: int, default = 0
+        The scattering order of the collided flux problem.
     volumetric_sources: List[pyopensn.source.VolumetricSource], default=[]
         A list of volumetric sources.
     )"
