@@ -43,7 +43,8 @@ LBSProblem::GetInputParameters()
 
   params.AddRequiredParameter<std::shared_ptr<MeshContinuum>>("mesh", "Mesh");
 
-  params.AddRequiredParameter<size_t>("num_groups", "The total number of groups within the solver");
+  params.AddRequiredParameter<unsigned int>("num_groups",
+                                            "The total number of groups within the solver");
 
   params.AddRequiredParameterArray("groupsets",
                                    "An array of blocks each specifying the input parameters for a "
@@ -65,24 +66,18 @@ LBSProblem::GetInputParameters()
 
   params.AddOptionalParameter("use_gpus", false, "Offload the sweep computation to GPUs.");
 
-  params.AddOptionalParameter(
-    "time_dependent", false, "Flag indicating whether the problem is time dependent.");
   return params;
 }
 
 LBSProblem::LBSProblem(const InputParameters& params)
   : Problem(params),
-    time_dependent_(params.GetParamValue<bool>("time_dependent")),
-    num_groups_(params.GetParamValue<size_t>("num_groups")),
+    num_groups_(params.GetParamValue<unsigned int>("num_groups")),
     grid_(params.GetSharedPtrParam<MeshContinuum>("mesh")),
     use_gpus_(params.GetParamValue<bool>("use_gpus"))
 {
   // Check system for GPU acceleration
   if (use_gpus_)
   {
-    if (time_dependent_)
-      throw std::invalid_argument(GetName() +
-                                  ": Time dependent problems are not supported on GPUs.");
 #ifdef __OPENSN_WITH_GPU__
     CheckCapableDevices();
 #else
@@ -148,17 +143,11 @@ LBSProblem::GetTimeStep() const
   return dt_;
 }
 
-bool
-LBSProblem::IsTimeDependent() const
-{
-  return time_dependent_;
-}
-
 void
 LBSProblem::SetTheta(double theta)
 {
-  if (theta < 0.0 or theta > 1.0)
-    throw std::runtime_error(GetName() + " theta must be between 0.0 and 1.0.");
+  if (theta <= 0.0 or theta > 1.0)
+    throw std::runtime_error(GetName() + " theta must be in (0.0, 1.0].");
   theta_ = theta;
 }
 
@@ -198,7 +187,7 @@ LBSProblem::UseGPUs() const
   return use_gpus_;
 }
 
-size_t
+unsigned int
 LBSProblem::GetNumGroups() const
 {
   return num_groups_;
@@ -220,12 +209,6 @@ size_t
 LBSProblem::GetMaxPrecursorsPerMaterial() const
 {
   return max_precursors_per_material_;
-}
-
-const std::vector<LBSGroup>&
-LBSProblem::GetGroups() const
-{
-  return groups_;
 }
 
 std::vector<LBSGroupset>&
@@ -427,6 +410,12 @@ LBSProblem::GetActiveSetSourceFunction() const
   return active_set_source_function_;
 }
 
+void
+LBSProblem::SetActiveSetSourceFunction(SetSourceFunction source_function)
+{
+  active_set_source_function_ = std::move(source_function);
+}
+
 std::shared_ptr<AGSLinearSolver>
 LBSProblem::GetAGSSolver()
 {
@@ -460,7 +449,7 @@ LBSProblem::GetNumPhiIterativeUnknowns()
 }
 
 size_t
-LBSProblem::MapPhiFieldFunction(size_t g, size_t m) const
+LBSProblem::MapPhiFieldFunction(unsigned int g, size_t m) const
 {
   OpenSnLogicalErrorIf(phi_field_functions_local_map_.count({g, m}) == 0,
                        std::string("Failure to map phi field function g") + std::to_string(g) +
@@ -713,22 +702,22 @@ LBSProblem::PrintSimHeader()
            << "Initializing " << GetName() << "\n\n"
            << "Scattering order    : " << scattering_order_ << "\n"
            << "Number of moments   : " << num_moments_ << "\n"
-           << "Number of groups    : " << groups_.size() << "\n"
+           << "Number of groups    : " << num_groups_ << "\n"
            << "Number of groupsets : " << groupsets_.size() << "\n\n";
 
     for (const auto& groupset : groupsets_)
     {
       outstr << "***** Groupset " << groupset.id << " *****\n"
              << "Groups:\n";
-      const auto& groups = groupset.groups;
+      const auto n_gs_groups = groupset.GetNumGroups();
       constexpr int groups_per_line = 12;
-      for (size_t i = 0; i < groups.size(); ++i)
+      for (size_t i = 0; i < n_gs_groups; ++i)
       {
-        outstr << std::setw(5) << groups[i].id << ' ';
+        outstr << std::setw(5) << groupset.first_group + i << ' ';
         if ((i + 1) % groups_per_line == 0)
           outstr << '\n';
       }
-      if (!groups.empty() && groups.size() % groups_per_line != 0)
+      if (n_gs_groups > 0 && n_gs_groups % groups_per_line != 0)
         outstr << '\n';
     }
 
@@ -762,8 +751,6 @@ LBSProblem::InitializeGroupsets(const InputParameters& params)
   // Initialize groups
   if (num_groups_ == 0)
     throw std::invalid_argument(GetName() + ": Number of groups must be > 0");
-  for (size_t g = 0; g < num_groups_; ++g)
-    groups_.emplace_back(static_cast<int>(g));
 
   // Initialize groupsets
   const auto& groupsets_array = params.GetParam("groupsets");
@@ -777,7 +764,7 @@ LBSProblem::InitializeGroupsets(const InputParameters& params)
     gs_input_params.SetObjectType("LBSProblem:LBSGroupset");
     gs_input_params.AssignParameters(groupset_params);
     groupsets_.emplace_back(gs_input_params, gs, *this);
-    if (groupsets_.back().groups.empty())
+    if (groupsets_.back().GetNumGroups() == 0)
     {
       std::stringstream oss;
       oss << GetName() << ": No groups added to groupset " << groupsets_.back().id;
@@ -845,10 +832,10 @@ LBSProblem::InitializeMaterials()
   {
     mat->SetAdjointMode(options_.adjoint);
 
-    OpenSnLogicalErrorIf(mat->GetNumGroups() < groups_.size(),
+    OpenSnLogicalErrorIf(mat->GetNumGroups() < num_groups_,
                          "Cross-sections for block \"" + std::to_string(blk_id) +
                            "\" have fewer groups (" + std::to_string(mat->GetNumGroups()) +
-                           ") than the simulation (" + std::to_string(groups_.size()) + "). " +
+                           ") than the simulation (" + std::to_string(num_groups_) + "). " +
                            "Cross-sections must have at least as many groups as the simulation.");
   }
 
@@ -948,7 +935,7 @@ LBSProblem::InitializeParrays()
   flux_moments_uk_man_.unknowns.clear();
   for (size_t m = 0; m < num_moments_; ++m)
   {
-    flux_moments_uk_man_.AddUnknown(UnknownType::VECTOR_N, groups_.size());
+    flux_moments_uk_man_.AddUnknown(UnknownType::VECTOR_N, num_groups_);
     flux_moments_uk_man_.unknowns.back().name = "m" + std::to_string(m);
   }
 
@@ -957,8 +944,7 @@ LBSProblem::InitializeParrays()
   global_node_count_ = discretization_->GetNumGlobalNodes();
 
   // Compute num of unknowns
-  size_t num_grps = groups_.size();
-  size_t local_unknown_count = local_node_count_ * num_grps * num_moments_;
+  size_t local_unknown_count = local_node_count_ * num_groups_ * num_moments_;
 
   log.LogAllVerbose1() << "LBS Number of phi unknowns: " << local_unknown_count;
 
@@ -1036,7 +1022,7 @@ LBSProblem::InitializeParrays()
     min_cell_dof_count_ = std::min(min_cell_dof_count_, static_cast<unsigned int>(num_nodes));
     cell_transport_views_.emplace_back(cell_phi_address,
                                        num_nodes,
-                                       num_grps,
+                                       num_groups_,
                                        num_moments_,
                                        num_faces,
                                        *block_id_to_xs_map_[cell.block_id],
@@ -1045,7 +1031,7 @@ LBSProblem::InitializeParrays()
                                        face_locality,
                                        neighbor_cell_ptrs,
                                        cell_on_boundary);
-    block_MG_counter += num_nodes * num_grps * num_moments_;
+    block_MG_counter += num_nodes * num_groups_ * num_moments_;
   } // for local cell
 
   // Populate grid nodal mappings
@@ -1097,7 +1083,7 @@ LBSProblem::InitializeFieldFunctions()
   // Initialize Field Functions for flux moments
   phi_field_functions_local_map_.clear();
 
-  for (size_t g = 0; g < groups_.size(); ++g)
+  for (unsigned int g = 0; g < num_groups_; ++g)
   {
     for (size_t m = 0; m < num_moments_; ++m)
     {
@@ -1153,9 +1139,6 @@ void
 LBSProblem::InitializeSolverSchemes()
 {
   CALI_CXX_MARK_SCOPE("LBSProblem::InitializeSolverSchemes");
-
-  log.Log() << "Initializing WGS and AGS solvers";
-
   InitializeWGSSolvers();
 
   ags_solver_ = std::make_shared<AGSLinearSolver>(*this, wgs_solvers_);
@@ -1220,7 +1203,7 @@ LBSProblem::UpdateFieldFunctions()
   // Update flux moments
   for (const auto& [g_and_m, ff_index] : phi_field_functions_local_map_)
   {
-    const size_t g = g_and_m.first;
+    const auto g = g_and_m.first;
     const size_t m = g_and_m.second;
 
     std::vector<double> data_vector_local(local_node_count_, 0.0);
@@ -1267,7 +1250,7 @@ LBSProblem::UpdateFieldFunctions()
         const auto imapB = sdm.MapDOFLocal(cell, i, phi_uk_man, 0, 0);
 
         double nodal_power = 0.0;
-        for (size_t g = 0; g < groups_.size(); ++g)
+        for (unsigned int g = 0; g < num_groups_; ++g)
         {
           const double sigma_fg = xs->GetSigmaFission()[g];
           // const double kappa_g = xs->Kappa()[g];
@@ -1298,7 +1281,7 @@ LBSProblem::UpdateFieldFunctions()
     // scale scalar flux if neccessary
     if (scale_factor != 1.0)
     {
-      for (size_t g = 0; g < groups_.size(); ++g)
+      for (unsigned int g = 0; g < num_groups_; ++g)
       {
         const size_t phi_ff_index = phi_field_functions_local_map_.at({g, size_t{0}});
         auto& phi_ff_ptr = field_functions_.at(phi_ff_index);
@@ -1324,7 +1307,7 @@ LBSProblem::SetPhiFromFieldFunctions(PhiSTLOption which_phi,
     for (size_t m = 0; m < num_moments_; ++m)
       m_ids_to_copy.push_back(m);
   if (g_ids_to_copy.empty())
-    for (size_t g = 0; g < num_groups_; ++g)
+    for (unsigned int g = 0; g < num_groups_; ++g)
       g_ids_to_copy.push_back(g);
 
   const auto& sdm = *discretization_;
@@ -1366,9 +1349,6 @@ LBSProblem::~LBSProblem()
 void
 LBSProblem::SetAdjoint(bool adjoint)
 {
-  if (adjoint and time_dependent_)
-    throw std::invalid_argument(GetName() + ": Time-dependent adjoint problems are not supported.");
-
   if (adjoint != options_.adjoint)
   {
     options_.adjoint = adjoint;

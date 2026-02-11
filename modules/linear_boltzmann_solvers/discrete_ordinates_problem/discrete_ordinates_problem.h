@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/sweep_chunk.h"
 #include "framework/parameters/parameter_block.h"
 #include <memory>
+#include <optional>
 
 namespace opensn
 {
@@ -22,6 +23,27 @@ protected:
   using SweepOrderGroupingInfo = std::pair<UniqueSOGroupings, DirIDToSOMap>;
 
 public:
+  enum class SweepChunkMode
+  {
+    Default = 0,
+    SteadyState = 1,
+    TimeDependent = 2
+  };
+
+  void SetSweepChunkMode(SweepChunkMode mode);
+  void ResetSweepChunkMode() { sweep_chunk_mode_.reset(); }
+  bool IsTimeDependent() const
+  {
+    return sweep_chunk_mode_.value_or(SweepChunkMode::Default) == SweepChunkMode::TimeDependent;
+  }
+  std::shared_ptr<SweepChunk> CreateSweepChunk(LBSGroupset& groupset)
+  {
+    return SetSweepChunk(groupset);
+  }
+  void EnableTimeDependentMode();
+  /// Rebuild WGS/AGS solver schemes (e.g., after changing sweep chunk mode).
+  void ReinitializeSolverSchemes();
+
   /// Static registration based constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
   ~DiscreteOrdinatesProblem() override;
@@ -70,6 +92,9 @@ public:
 
   void SetBoundaryOptions(const InputParameters& params) override;
   void ClearBoundaries() override;
+
+  void CopyPhiAndSrcToDevice();
+  void CopyPhiAndOutflowBackToHost();
 
 protected:
   explicit DiscreteOrdinatesProblem(const std::string& name,
@@ -126,18 +151,29 @@ protected:
   /// Max angle-set size.
   std::size_t max_angleset_size_ = 0;
   /// Max group-set size.
-  std::size_t max_groupset_size_ = 0;
+  unsigned int max_groupset_size_ = 0;
 
   std::shared_ptr<GridFaceHistogram> grid_face_histogram_ = nullptr;
 
   std::vector<std::vector<double>> psi_new_local_;
   std::vector<std::vector<double>> psi_old_local_;
+  std::optional<SweepChunkMode> sweep_chunk_mode_;
 
 private:
-  void CreateFLUDSCommonDataForDevice();
-  std::shared_ptr<FLUDS> CreateFLUDSForDevice(std::size_t num_groups,
-                                              std::size_t num_angles,
-                                              const FLUDSCommonData& common_data);
+  void CreateAAHD_FLUDSCommonData();
+  std::shared_ptr<FLUDS> CreateAAHD_FLUDS(unsigned int num_groups,
+                                          std::size_t num_angles,
+                                          const FLUDSCommonData& common_data);
+  std::shared_ptr<AngleSet>
+  CreateAAHD_AngleSet(size_t id,
+                      unsigned int num_groups,
+                      const SPDS& spds,
+                      std::shared_ptr<FLUDS>& fluds,
+                      std::vector<size_t>& angle_indices,
+                      std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
+                      int maximum_message_size,
+                      const MPICommunicatorSet& in_comm_set);
+  std::shared_ptr<SweepChunk> CreateAAHD_SweepChunk(LBSGroupset& groupset);
 
   /**
    * This routine groups angle-indices to groups sharing the same sweep ordering. It also takes

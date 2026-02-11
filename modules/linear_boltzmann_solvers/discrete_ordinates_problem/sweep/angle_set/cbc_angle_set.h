@@ -16,13 +16,12 @@ class CBC_AngleSet : public AngleSet
 {
 public:
   CBC_AngleSet(size_t id,
-               size_t num_groups,
+               unsigned int num_groups,
                const SPDS& spds,
                std::shared_ptr<FLUDS>& fluds,
                const std::vector<size_t>& angle_indices,
                std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
-               const MPICommunicatorSet& comm_set,
-               bool use_gpu);
+               const MPICommunicatorSet& comm_set);
 
   AsynchronousCommunicator* GetCommunicator() override;
 

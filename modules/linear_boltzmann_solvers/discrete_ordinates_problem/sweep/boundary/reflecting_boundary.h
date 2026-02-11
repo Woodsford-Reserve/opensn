@@ -13,7 +13,7 @@ namespace opensn
 class ReflectingBoundary : public SweepBoundary
 {
 public:
-  ReflectingBoundary(size_t num_groups,
+  ReflectingBoundary(unsigned int num_groups,
                      const Vector3& normal,
                      CoordinateSystemType coord_type = CoordinateSystemType::CARTESIAN)
     : SweepBoundary(LBSBoundaryType::REFLECTING, num_groups, coord_type), normal_(normal)
@@ -28,6 +28,18 @@ public:
 
   void InitializeDelayedAngularFlux(const std::shared_ptr<MeshContinuum>& grid,
                                     const AngularQuadrature& quadrature) override;
+
+  /**
+   * Get the list of anglesets that depend on a given angleset.
+   * If the boundary is not opposing reflecting, this method extracts all anglesets in the angle
+   * aggregation that can only begin sweeping after the given angle set has completed its sweep.
+   * \param following_angle_sets Output set to which the dependent anglesets will be added.
+   * \param angle_agg Angle aggregation containing all anglesets.
+   * \param angleset Angleset for which dependent anglesets are sought.
+   */
+  void GetFollowingAngleSets(std::set<AngleSet*>& following_angle_sets,
+                             const AngleAggregation& angle_agg,
+                             const AngleSet& angleset) override;
 
   void FinalizeDelayedAngularFluxSetup(
     uint64_t boundary_id,

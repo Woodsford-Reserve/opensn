@@ -14,14 +14,13 @@ class AAH_AngleSet : public AngleSet
 {
 public:
   AAH_AngleSet(size_t id,
-               size_t num_groups,
+               unsigned int num_groups,
                const SPDS& spds,
                std::shared_ptr<FLUDS>& fluds,
                std::vector<size_t>& angle_indices,
                std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
                int maximum_message_size,
-               const MPICommunicatorSet& in_comm_set,
-               bool use_gpu);
+               const MPICommunicatorSet& in_comm_set);
 
   void InitializeDelayedUpstreamData() override;
 

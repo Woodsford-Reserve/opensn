@@ -37,6 +37,7 @@ PyApp::PyApp(const mpi::Communicator& comm)
   Console::BindModule(WrapQuadraturePointPhiTheta);
   Console::BindModule(WrapQuadrature);
   Console::BindModule(WrapProductQuadrature);
+  Console::BindModule(WrapTriangularQuadrature);
   Console::BindModule(WrapCurvilinearProductQuadrature);
   Console::BindModule(WrapSLDFEsqQuadrature);
   Console::BindModule(WrapLebedevQuadrature);
@@ -63,6 +64,7 @@ PyApp::PyApp(const mpi::Communicator& comm)
   Console::BindModule(WrapLBS);
   Console::BindModule(WrapSteadyState);
   Console::BindModule(WrapTimeDependent);
+  Console::BindModule(WrapTransient);
   Console::BindModule(WrapNLKEigen);
   Console::BindModule(WrapPIteration);
   Console::BindModule(WrapDiscreteOrdinatesKEigenAcceleration);

@@ -71,7 +71,6 @@ public:
   double GetTheta() const;
 
   /// Is the problem time dependent
-  bool IsTimeDependent() const;
 
   void SetAdjoint(bool adjoint);
 
@@ -87,7 +86,7 @@ public:
   bool UseGPUs() const;
 
   /// Returns the number of groups for the solver. This will only be non-zero after initialization.
-  size_t GetNumGroups() const;
+  unsigned int GetNumGroups() const;
 
   /// Returns the scattering order for the solver. This will only be non-zero after initialization.
   unsigned int GetScatteringOrder() const;
@@ -103,8 +102,6 @@ public:
    * after initialization.
    */
   size_t GetMaxPrecursorsPerMaterial() const;
-
-  const std::vector<LBSGroup>& GetGroups() const;
 
   std::vector<LBSGroupset>& GetGroupsets();
 
@@ -209,6 +206,7 @@ public:
   const std::vector<double>& GetDensitiesLocal() const;
 
   SetSourceFunction GetActiveSetSourceFunction() const;
+  void SetActiveSetSourceFunction(SetSourceFunction source_function);
 
   std::shared_ptr<AGSLinearSolver> GetAGSSolver();
 
@@ -223,7 +221,7 @@ public:
   virtual std::pair<size_t, size_t> GetNumPhiIterativeUnknowns();
 
   /// Gets the local handle of a flux-moment based field function.
-  size_t MapPhiFieldFunction(size_t g, size_t m) const;
+  size_t MapPhiFieldFunction(unsigned int g, size_t m) const;
 
   /// Returns the power generation field function, if enabled.
   std::shared_ptr<FieldFunctionGridBased> GetPowerFieldFunction() const;
@@ -296,17 +294,15 @@ protected:
 
   LBSOptions options_;
   double time_ = 0.0;
-  bool time_dependent_ = false;
   double theta_ = 1.0;
   double dt_ = 1.0;
   GeometryType geometry_type_ = GeometryType::INVALID;
   size_t num_moments_ = 0;
-  size_t num_groups_ = 0;
+  unsigned int num_groups_ = 0;
   unsigned int scattering_order_ = 0;
   size_t num_precursors_ = 0;
   size_t max_precursors_per_material_ = 0;
 
-  std::vector<LBSGroup> groups_;
   std::vector<LBSGroupset> groupsets_;
 
   BlockID2XSMap block_id_to_xs_map_;
@@ -341,7 +337,7 @@ protected:
   std::shared_ptr<AGSLinearSolver> ags_solver_;
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
 
-  std::map<std::pair<size_t, size_t>, size_t> phi_field_functions_local_map_;
+  std::map<std::pair<unsigned int, size_t>, size_t> phi_field_functions_local_map_;
   size_t power_gen_fieldfunc_local_handle_ = 0;
 
   /**

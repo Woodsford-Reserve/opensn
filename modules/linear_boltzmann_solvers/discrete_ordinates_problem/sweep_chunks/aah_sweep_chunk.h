@@ -33,22 +33,17 @@ public:
   void Sweep(AngleSet& angle_set) override;
 
 protected:
-  void CPUSweep(AngleSet& angle_set);
-  void GPUSweep(AngleSet& angle_set);
-
   DiscreteOrdinatesProblem& problem_;
   size_t max_level_size_;
-  size_t group_block_size_;
-  bool use_gpus_;
-  void* level_vector_ = nullptr;
+  unsigned int group_block_size_;
 
 private:
-  using CpuSweepFunc = void (AAHSweepChunk::*)(AngleSet&);
-  CpuSweepFunc cpu_sweep_impl_ = nullptr;
+  using SweepFunc = void (AAHSweepChunk::*)(AngleSet&);
+  SweepFunc sweep_impl_ = nullptr;
 
-  void CPUSweep_Generic(AngleSet& angle_set);
-  template <int NumNodes>
-  void CPUSweep_FixedN(AngleSet& angle_set);
+  void Sweep_Generic(AngleSet& angle_set);
+  template <unsigned int NumNodes>
+  void Sweep_FixedN(AngleSet& angle_set);
 };
 
 } // namespace opensn

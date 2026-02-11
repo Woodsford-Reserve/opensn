@@ -109,8 +109,8 @@ WGSLinearSolver::PreSolveCallback()
   if (do_problem.GetOptions().verbose_inner_iterations)
   {
     log.Log() << "Solving groupset " << groupset.id << " with " << this->GetIterativeMethodName()
-              << " (groups " << groupset.groups.front().id << "-" << groupset.groups.back().id
-              << ", " << groupset.quadrature->abscissae.size() << " angles)\n";
+              << " (groups " << groupset.first_group << "-" << groupset.last_group << ", "
+              << groupset.quadrature->abscissae.size() << " angles)\n";
   }
   gs_context_ptr->PreSolveCallback();
 }
@@ -164,13 +164,9 @@ WGSLinearSolver::SetRHS()
       groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
 
     // Enable RHS time (tau*psi^n)
-    if (do_problem.IsTimeDependent())
-    {
-      auto sweep_ctx = std::dynamic_pointer_cast<SweepWGSContext>(gs_context_ptr);
-      if (!sweep_ctx)
-        throw std::runtime_error("MatrixAction requires SweepWGSContext.");
+    auto sweep_ctx = std::dynamic_pointer_cast<SweepWGSContext>(gs_context_ptr);
+    if (sweep_ctx && sweep_ctx->sweep_chunk->IsTimeDependent())
       sweep_ctx->sweep_chunk->IncludeRHSTimeTerm(true);
-    }
 
     // Apply transport operator
     gs_context_ptr->ApplyInverseTransportOperator(scope);
@@ -230,9 +226,25 @@ WGSLinearSolver::PostSolveCallback()
   {
     KSPConvergedReason reason = KSP_CONVERGED_ITERATING;
     KSPGetConvergedReason(ksp_, &reason);
-    if (reason != KSP_CONVERGED_RTOL and reason != KSP_DIVERGED_ITS)
-      log.Log0Warning() << "Krylov solver failed. "
+    PetscInt its = 0;
+    KSPGetIterationNumber(ksp_, &its);
+    if (reason < 0)
+      log.Log0Warning() << "Krylov solver diverged. "
                         << "Reason: " << GetPETScConvergedReasonstring(reason);
+    else if (reason == KSP_CONVERGED_RTOL)
+    {
+      auto gs_context_ptr = std::dynamic_pointer_cast<WGSContext>(context_ptr_);
+      if (gs_context_ptr && gs_context_ptr->log_info && its == 0)
+        log.Log() << program_timer.GetTimeString() << " CONVERGED (relative tolerance)";
+    }
+    else if (reason == KSP_CONVERGED_ATOL)
+    {
+      auto gs_context_ptr = std::dynamic_pointer_cast<WGSContext>(context_ptr_);
+      if (gs_context_ptr && gs_context_ptr->log_info && its == 0)
+        log.Log() << program_timer.GetTimeString() << " CONVERGED (absolute tolerance)";
+    }
+    else if (reason == KSP_DIVERGED_ITS)
+      log.Log0Warning() << "Krylov solver reached iteration limit.";
   }
 
   // Copy x to local solution

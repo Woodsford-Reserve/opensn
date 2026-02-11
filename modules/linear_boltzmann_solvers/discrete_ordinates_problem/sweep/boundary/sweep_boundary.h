@@ -6,11 +6,14 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_structs.h"
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace opensn
 {
 
+class AngleSet;
+class AngleAggregation;
 class MeshContinuum;
 
 /// Base class for sweep related boundaries.
@@ -18,7 +21,7 @@ class SweepBoundary
 {
 public:
   explicit SweepBoundary(LBSBoundaryType bndry_type,
-                         size_t num_groups,
+                         unsigned int num_groups,
                          CoordinateSystemType coord_type)
     : num_groups_(num_groups), type_(bndry_type), coord_type_(coord_type)
   {
@@ -41,6 +44,16 @@ public:
 
   virtual void InitializeDelayedAngularFlux(const std::shared_ptr<MeshContinuum>& grid,
                                             const AngularQuadrature& quadrature)
+  {
+  }
+
+  /**
+   * Get the list of anglesets that depend on a given angleset.
+   * This function can only be applied to reflecting boundary and AAHD anglesets.
+   */
+  virtual void GetFollowingAngleSets(std::set<AngleSet*>& following_angle_sets,
+                                     const AngleAggregation& angle_agg,
+                                     const AngleSet& angleset)
   {
   }
 
@@ -109,7 +122,7 @@ public:
 
 protected:
   std::vector<double> zero_boundary_flux_;
-  size_t num_groups_;
+  unsigned int num_groups_;
 
 private:
   const LBSBoundaryType type_;

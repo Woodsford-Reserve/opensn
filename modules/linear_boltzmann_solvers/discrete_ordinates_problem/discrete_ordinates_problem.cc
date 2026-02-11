@@ -37,6 +37,7 @@
 #include "caliper/cali.h"
 #include <algorithm>
 #include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 namespace opensn
@@ -170,7 +171,7 @@ DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params
   {
     groupset.psi_uk_man_.unknowns.clear();
     size_t num_angles = groupset.quadrature->abscissae.size();
-    size_t gs_num_groups = groupset.groups.size();
+    auto gs_num_groups = groupset.GetNumGroups();
     auto& grpset_psi_uk_man = groupset.psi_uk_man_;
     const auto VarVecN = UnknownType::VECTOR_N;
     for (unsigned int n = 0; n < num_angles; ++n)
@@ -235,8 +236,47 @@ void
 DiscreteOrdinatesProblem::SetBoundaryOptions(const InputParameters& params)
 {
   const auto boundary_name = params.GetParamValue<std::string>("name");
+  const auto coord_sys = grid_->GetCoordinateSystem();
   const auto bnd_name_map = grid_->GetBoundaryNameMap();
-  const auto bid = bnd_name_map.at(boundary_name);
+  const auto mesh_type = grid_->GetType();
+
+  // If we're using RZ, the user should use rmin/rmax/zmin/zmax and we'll
+  // map internally to xmin/xmax/ymin/max
+  std::string lookup_name = boundary_name;
+  if (coord_sys == CoordinateSystemType::CYLINDRICAL and mesh_type == MeshType::ORTHOGONAL and
+      grid_->GetDimension() == 2)
+  {
+    if (boundary_name != "rmin" and boundary_name != "rmax" and boundary_name != "zmin" and
+        boundary_name != "zmax")
+    {
+      throw std::runtime_error(GetName() + ": Boundary name '" + boundary_name +
+                               "' is invalid for cylindrical orthogonal meshes. "
+                               "Use rmin, rmax, zmin, zmax.");
+    }
+
+    const std::map<std::string, std::string> rz_map = {
+      {"rmin", "xmin"}, {"rmax", "xmax"}, {"zmin", "ymin"}, {"zmax", "ymax"}};
+    const auto rz_it = rz_map.find(boundary_name);
+    if (rz_it != rz_map.end())
+      lookup_name = rz_it->second;
+  }
+
+  const auto it = bnd_name_map.find(lookup_name);
+  if (it == bnd_name_map.end())
+  {
+    std::ostringstream names;
+    bool first = true;
+    for (const auto& [_, name] : bnd_name_map)
+    {
+      if (not first)
+        names << ", ";
+      names << name;
+      first = false;
+    }
+    throw std::runtime_error(GetName() + ": Boundary name '" + boundary_name +
+                             "' not found in mesh. Available boundaries: [" + names.str() + "].");
+  }
+  const auto bid = it->second;
   boundary_definitions_[bid] = CreateBoundaryFromParams(params);
 }
 
@@ -257,7 +297,23 @@ DiscreteOrdinatesProblem::CreateBoundaryFromParams(const InputParameters& params
     {"reflecting", LBSBoundaryType::REFLECTING},
     {"arbitrary", LBSBoundaryType::ARBITRARY}};
 
-  const auto type = type_list.at(bndry_type);
+  const auto type_it = type_list.find(bndry_type);
+  if (type_it == type_list.end())
+  {
+    std::ostringstream types;
+    bool first = true;
+    for (const auto& [name, _] : type_list)
+    {
+      if (not first)
+        types << ", ";
+      types << name;
+      first = false;
+    }
+    throw std::runtime_error("Boundary '" + boundary_name + "' has unknown type='" + bndry_type +
+                             "'. Allowed types: [" + types.str() + "].");
+  }
+
+  const auto type = type_it->second;
   if (type == LBSBoundaryType::ISOTROPIC)
   {
     if (not params.Has("group_strength"))
@@ -391,7 +447,7 @@ DiscreteOrdinatesProblem::PrintSimHeader()
            << "Initializing " << GetName() << "\n\n"
            << "Scattering order    : " << scattering_order_ << "\n"
            << "Number of moments   : " << num_moments_ << "\n"
-           << "Number of groups    : " << groups_.size() << "\n"
+           << "Number of groups    : " << num_groups_ << "\n"
            << "Number of groupsets : " << groupsets_.size() << "\n\n";
 
     for (const auto& groupset : groupsets_)
@@ -399,15 +455,15 @@ DiscreteOrdinatesProblem::PrintSimHeader()
       outstr << "***** Groupset " << groupset.id << " *****\n"
              << "Number of angles: " << groupset.quadrature->abscissae.size() << "\n"
              << "Groups:\n";
-      const auto& groups = groupset.groups;
+      const auto n_gs_groups = groupset.GetNumGroups();
       constexpr int groups_per_line = 12;
-      for (size_t i = 0; i < groups.size(); ++i)
+      for (size_t i = 0; i < n_gs_groups; ++i)
       {
-        outstr << std::setw(5) << groups[i].id << ' ';
+        outstr << std::setw(5) << groupset.first_group + i << ' ';
         if ((i + 1) % groups_per_line == 0)
           outstr << '\n';
       }
-      if (!groups.empty() && groups.size() % groups_per_line != 0)
+      if (n_gs_groups > 0 && n_gs_groups % groups_per_line != 0)
         outstr << '\n';
     }
 
@@ -442,11 +498,13 @@ DiscreteOrdinatesProblem::Initialize()
   {
     psi_new_local_.emplace_back();
     psi_old_local_.emplace_back();
-    if (options_.save_angular_flux || time_dependent_)
+    const bool save_old =
+      (sweep_chunk_mode_.value_or(SweepChunkMode::Default) == SweepChunkMode::TimeDependent);
+    if (options_.save_angular_flux || save_old)
     {
       size_t num_ang_unknowns = discretization_->GetNumLocalDOFs(groupset.psi_uk_man_);
       psi_new_local_.back().assign(num_ang_unknowns, 0.0);
-      if (time_dependent_)
+      if (save_old)
         psi_old_local_.back().assign(num_ang_unknowns, 0.0);
     }
   }
@@ -481,9 +539,68 @@ DiscreteOrdinatesProblem::Initialize()
 }
 
 void
+DiscreteOrdinatesProblem::SetSweepChunkMode(SweepChunkMode mode)
+{
+  sweep_chunk_mode_ = mode;
+  if (mode == SweepChunkMode::TimeDependent && discretization_)
+  {
+    if (psi_old_local_.empty())
+      return;
+    if (psi_old_local_.front().empty())
+    {
+      for (auto& groupset : groupsets_)
+      {
+        size_t num_ang_unknowns = discretization_->GetNumLocalDOFs(groupset.psi_uk_man_);
+        psi_old_local_.at(groupset.id).assign(num_ang_unknowns, 0.0);
+      }
+    }
+  }
+}
+
+void
+DiscreteOrdinatesProblem::EnableTimeDependentMode()
+{
+  if (UseGPUs())
+    throw std::runtime_error(GetName() + ": Time dependent problems are not supported on GPUs.");
+  if (options_.adjoint)
+    throw std::runtime_error(GetName() + ": Time-dependent adjoint problems are not supported.");
+  if (geometry_type_ == GeometryType::TWOD_CYLINDRICAL)
+    throw std::runtime_error(GetName() + ": Time-dependent RZ problems are not yet supported.");
+
+  SetSweepChunkMode(SweepChunkMode::TimeDependent);
+}
+
+void
+DiscreteOrdinatesProblem::ReinitializeSolverSchemes()
+{
+  InitializeSolverSchemes();
+}
+
+void
 DiscreteOrdinatesProblem::InitializeBoundaries()
 {
   CALI_CXX_MARK_SCOPE("DiscreteOrdinatesProblem::InitializeBoundaries");
+
+  // RZ doesn't yet support reflecting boundaries on rmax
+  if (geometry_type_ == GeometryType::TWOD_CYLINDRICAL)
+  {
+    const auto& bndry_map = grid_->GetBoundaryNameMap();
+    const auto it = bndry_map.find("xmax");
+    if (it != bndry_map.end())
+    {
+      const uint64_t bid = it->second;
+      const auto bndry_it = boundary_definitions_.find(bid);
+      if (bndry_it != boundary_definitions_.end() &&
+          bndry_it->second.first == LBSBoundaryType::REFLECTING)
+      {
+        std::ostringstream oss;
+        oss << GetName() << ":\n"
+            << "Reflecting boundary on rmax is not supported in RZ.\n"
+            << "Please use vacuum or isotropic on rmax.";
+        throw std::runtime_error(oss.str());
+      }
+    }
+  }
 
   // Determine boundary-ids involved in the problem
   std::set<uint64_t> global_unique_bids_set;
@@ -577,7 +694,7 @@ DiscreteOrdinatesProblem::InitializeWGSSolvers()
   for (auto& groupset : groupsets_)
   {
     // Max groupset size
-    max_groupset_size_ = std::max(max_groupset_size_, groupset.groups.size());
+    max_groupset_size_ = std::max(max_groupset_size_, groupset.GetNumGroups());
 
     for (auto& angleset : *(groupset.angle_agg))
     {
@@ -673,9 +790,9 @@ DiscreteOrdinatesProblem::ReorientAdjointSolution()
       } // for angle m
     } // if saving angular flux
 
-    const auto num_gs_groups = groupset.groups.size();
-    const auto gsg_i = groupset.groups.front().id;
-    const auto gsg_f = groupset.groups.back().id;
+    const auto num_gs_groups = groupset.GetNumGroups();
+    const auto gsg_i = groupset.first_group;
+    const auto gsg_f = groupset.last_group;
 
     for (const auto& cell : grid_->local_cells)
     {
@@ -728,8 +845,8 @@ DiscreteOrdinatesProblem::ZeroOutflowBalanceVars(LBSGroupset& groupset)
 
   for (const auto& cell : grid_->local_cells)
     for (int f = 0; f < cell.faces.size(); ++f)
-      for (auto& group : groupset.groups)
-        cell_transport_views_[cell.local_id].ZeroOutflow(f, group.id);
+      for (auto group = groupset.first_group; group <= groupset.last_group; ++group)
+        cell_transport_views_[cell.local_id].ZeroOutflow(f, group);
 }
 
 void
@@ -786,27 +903,29 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
       }
     }
 
-    // Accumulate global edge weights for each SPDS across all ranks.
+    // Accumulate global edge weights for each SPDS on the owning rank only.
     const int comm_size = opensn::mpi_comm.size();
     const int matrix_size = comm_size * comm_size;
+    std::vector<int> recv_counts(opensn::mpi_comm.size(), comm_size);
+    std::vector<int> recv_displacements(opensn::mpi_comm.size(), 0);
+    for (int loc = 0; loc < opensn::mpi_comm.size(); ++loc)
+      recv_displacements[loc] = loc * comm_size;
     for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
     {
       for (const auto& spds : spds_list)
       {
         auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
+        const int owner = aah_spds->GetId() % opensn::mpi_comm.size();
 
         // Local contributions - weights from this rank to all others for this SPDS
         const auto local_row = aah_spds->ComputeLocalLocationEdgeWeights();
-        std::vector<double> send(matrix_size, 0.0);
-        std::vector<double> recv(matrix_size, 0.0);
+        std::vector<double> recv;
+        if (opensn::mpi_comm.rank() == owner)
+          recv.assign(matrix_size, 0.0);
+        opensn::mpi_comm.gather(local_row, recv, recv_counts, recv_displacements, owner);
 
-        const int rank = opensn::mpi_comm.rank();
-        for (int to = 0; to < comm_size; ++to)
-          send[rank * comm_size + to] = local_row[to];
-
-        opensn::mpi_comm.all_reduce(send.data(), matrix_size, recv.data(), mpi::op::sum<double>());
-
-        aah_spds->SetGlobalEdgeWeights(recv);
+        if (opensn::mpi_comm.rank() == owner)
+          aah_spds->SetGlobalEdgeWeights(recv);
       }
     }
 
@@ -937,7 +1056,7 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
   quadrature_fluds_commondata_map_.clear();
   if (sweep_type_ == "AAH" && use_gpus_)
   {
-    CreateFLUDSCommonDataForDevice();
+    CreateAAHD_FLUDSCommonData();
   }
   else if (sweep_type_ == "AAH")
   {
@@ -968,20 +1087,54 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
 
 #ifndef __OPENSN_WITH_GPU__
 void
-DiscreteOrdinatesProblem::CreateFLUDSCommonDataForDevice()
+DiscreteOrdinatesProblem::CreateAAHD_FLUDSCommonData()
 {
   throw std::runtime_error(
-    "DiscreteOrdinatesProblem::CreateFLUDSCommonDataForDevice : OPENSN_WITH_CUDA not enabled.");
+    "DiscreteOrdinatesProblem::CreateAAHD_FLUDSCommonData : OPENSN_WITH_CUDA not enabled.");
 }
 
 std::shared_ptr<FLUDS>
-DiscreteOrdinatesProblem::CreateFLUDSForDevice(std::size_t num_groups,
-                                               std::size_t num_angles,
-                                               const FLUDSCommonData& common_data)
+DiscreteOrdinatesProblem::CreateAAHD_FLUDS(unsigned int num_groups,
+                                           std::size_t num_angles,
+                                           const FLUDSCommonData& common_data)
 {
   throw std::runtime_error(
-    "DiscreteOrdinatesProblem::CreateFLUDSForDevice : OPENSN_WITH_CUDA not enabled.");
+    "DiscreteOrdinatesProblem::CreateAAHD_FLUDS : OPENSN_WITH_CUDA not enabled.");
   return {};
+}
+
+std::shared_ptr<AngleSet>
+DiscreteOrdinatesProblem::CreateAAHD_AngleSet(
+  size_t id,
+  unsigned int num_groups,
+  const SPDS& spds,
+  std::shared_ptr<FLUDS>& fluds,
+  std::vector<size_t>& angle_indices,
+  std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
+  int maximum_message_size,
+  const MPICommunicatorSet& in_comm_set)
+{
+  throw std::runtime_error(
+    "DiscreteOrdinatesProblem::CreateAAHD_AngleSet : OPENSN_WITH_CUDA not enabled.");
+  return {};
+}
+
+std::shared_ptr<SweepChunk>
+DiscreteOrdinatesProblem::CreateAAHD_SweepChunk(LBSGroupset& groupset)
+{
+  throw std::runtime_error(
+    "DiscreteOrdinatesProblem::CreateAAHD_SweepChunk : OPENSN_WITH_CUDA not enabled.");
+  return {};
+}
+
+void
+DiscreteOrdinatesProblem::CopyPhiAndSrcToDevice()
+{
+}
+
+void
+DiscreteOrdinatesProblem::CopyPhiAndOutflowBackToHost()
+{
 }
 #endif
 
@@ -1003,22 +1156,39 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
   UniqueSOGroupings unq_so_grps;
   switch (agg_type)
   {
-    // Single
-    // The easiest aggregation type. Every direction
-    // either has/is assumed to have a unique sweep
-    // ordering. Hence there is only group holding ALL
-    // the direction indices.
+    // SINGLE AGGREGATION
+    // The simplest aggregation type. Every direction is assumed to have a unique sweep ordering.
+    // There are as many direction sets as there are directions.
     case AngleAggregationType::SINGLE:
     {
-      const size_t num_dirs = quadrature.omegas.size();
-      for (size_t n = 0; n < num_dirs; ++n)
-        unq_so_grps.push_back({n});
+      if (lbs_geo_type == GeometryType::TWOD_CYLINDRICAL)
+      {
+        // Preserve azimuthal ordering per polar level
+        const auto* product_quad = dynamic_cast<const ProductQuadrature*>(&quadrature);
+        if (product_quad)
+        {
+          for (const auto& dir_set : product_quad->GetDirectionMap())
+            for (const auto dir_id : dir_set.second)
+              unq_so_grps.push_back({dir_id});
+        }
+        else
+        {
+          const size_t num_dirs = quadrature.omegas.size();
+          for (size_t n = 0; n < num_dirs; ++n)
+            unq_so_grps.push_back({n});
+        }
+      }
+      else
+      {
+        const size_t num_dirs = quadrature.omegas.size();
+        for (size_t n = 0; n < num_dirs; ++n)
+          unq_so_grps.push_back({n});
+      }
       break;
     } // case agg_type SINGLE
 
-      // Polar
-      // The following conditions allow for polar
-      // angle aggregation.
+    // POLAR AGGREGATION
+    // Aggregate all polar directions for a given azimuthal direction into a direction set.
     case AngleAggregationType::POLAR:
     {
       // Check geometry types
@@ -1082,22 +1252,21 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
       break;
     } // case agg_type POLAR
 
-      // Azimuthal
+    // AZIMUTHAL AGGREGATION
+    // All azimuthal direction in a quadrant/octant are assigned to a direction set
     case AngleAggregationType::AZIMUTHAL:
     {
       // Check geometry types
       if (lbs_geo_type != GeometryType::ONED_SPHERICAL and
           lbs_geo_type != GeometryType::TWOD_CYLINDRICAL)
         throw std::logic_error(
-          GetName() + ": The simulation is using azimuthal angle aggregation for which only "
-                      "the TWOD_CYLINDRICAL derived geometry type is supported");
+          GetName() + ": AZIMUTHAL aggregation is only valid for TWOD_CYLINDRICAL geometry");
 
       // Check quadrature type
       const auto quad_type = quadrature.GetType();
       if (quad_type != AngularQuadratureType::ProductQuadrature)
-        throw std::logic_error(GetName() +
-                               ": The simulation is using azimuthal angle aggregation for "
-                               "which only product-type quadratures are supported");
+        throw std::logic_error(
+          GetName() + ": AZIMUTHAL aggregation is only valid for TWOD_CYLINDRICAL geometry.");
 
       // Process Product Quadrature
       try
@@ -1159,7 +1328,7 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
   const auto& unique_so_groupings = quadrature_sweep_info.first;
   const auto& dir_id_to_so_map = quadrature_sweep_info.second;
 
-  const size_t gs_num_grps = groupset.groups.size();
+  const size_t gs_num_grps = groupset.GetNumGroups();
 
   // Passing the sweep boundaries to the angle aggregation
   groupset.angle_agg =
@@ -1195,7 +1364,7 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
         std::shared_ptr<FLUDS> fluds;
         if (use_gpus_)
         {
-          fluds = CreateFLUDSForDevice(gs_num_grps, angle_indices.size(), fluds_common_data);
+          fluds = CreateAAHD_FLUDS(gs_num_grps, angle_indices.size(), fluds_common_data);
         }
         else
         {
@@ -1205,16 +1374,29 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
             dynamic_cast<const AAH_FLUDSCommonData&>(fluds_common_data));
         }
 
-        auto angle_set = std::make_shared<AAH_AngleSet>(angle_set_id++,
-                                                        gs_num_grps,
-                                                        *sweep_ordering,
-                                                        fluds,
-                                                        angle_indices,
-                                                        sweep_boundaries_,
-                                                        options_.max_mpi_message_size,
-                                                        *grid_local_comm_set_,
-                                                        use_gpus_);
-
+        std::shared_ptr<AngleSet> angle_set;
+        if (use_gpus_)
+        {
+          angle_set = CreateAAHD_AngleSet(angle_set_id++,
+                                          gs_num_grps,
+                                          *sweep_ordering,
+                                          fluds,
+                                          angle_indices,
+                                          sweep_boundaries_,
+                                          options_.max_mpi_message_size,
+                                          *grid_local_comm_set_);
+        }
+        else
+        {
+          angle_set = std::make_shared<AAH_AngleSet>(angle_set_id++,
+                                                     gs_num_grps,
+                                                     *sweep_ordering,
+                                                     fluds,
+                                                     angle_indices,
+                                                     sweep_boundaries_,
+                                                     options_.max_mpi_message_size,
+                                                     *grid_local_comm_set_);
+        }
         groupset.angle_agg->GetAngleSetGroups().push_back(angle_set);
       }
       else if (sweep_type_ == "CBC")
@@ -1232,8 +1414,7 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
                                                         fluds,
                                                         angle_indices,
                                                         sweep_boundaries_,
-                                                        *grid_local_comm_set_,
-                                                        use_gpus_);
+                                                        *grid_local_comm_set_);
 
         groupset.angle_agg->GetAngleSetGroups().push_back(angle_set);
       }
@@ -1253,28 +1434,25 @@ DiscreteOrdinatesProblem::SetSweepChunk(LBSGroupset& groupset)
 {
   CALI_CXX_MARK_SCOPE("DiscreteOrdinatesProblem::SetSweepChunk");
 
-  if (time_dependent_ && sweep_type_ != "AAH")
+  const auto mode = sweep_chunk_mode_.value_or(SweepChunkMode::Default);
+
+  const bool use_time_dependent_chunk = (mode == SweepChunkMode::TimeDependent);
+
+  if (use_time_dependent_chunk && sweep_type_ != "AAH")
     throw std::invalid_argument(GetName() +
                                 ": Time dependent is only supported with sweep_type='AAH'.");
 
   if (sweep_type_ == "AAH")
   {
-    if (time_dependent_)
-    {
-      auto sweep_chunk = std::make_shared<AAHSweepChunkTD>(*this, groupset);
-
-      return sweep_chunk;
-    }
-
-    auto sweep_chunk = std::make_shared<AAHSweepChunk>(*this, groupset);
-
-    return sweep_chunk;
+    if (use_time_dependent_chunk)
+      return std::make_shared<AAHSweepChunkTD>(*this, groupset);
+    if (use_gpus_)
+      return CreateAAHD_SweepChunk(groupset);
+    return std::make_shared<AAHSweepChunk>(*this, groupset);
   }
   else if (sweep_type_ == "CBC")
   {
-    auto sweep_chunk = std::make_shared<CBCSweepChunk>(*this, groupset);
-
-    return sweep_chunk;
+    return std::make_shared<CBCSweepChunk>(*this, groupset);
   }
   else
     OpenSnLogicalError("Unsupported sweep_type_ \"" + sweep_type_ + "\"");

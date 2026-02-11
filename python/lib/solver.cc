@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "python/lib/py_wrappers.h"
+#include <pybind11/functional.h>
 #include "framework/runtime.h"
 #include "framework/field_functions/field_function_grid_based.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/discrete_ordinates_keigen_acceleration.h"
@@ -11,6 +12,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/uncollided_problem/uncollided_problem.h"
 #include "modules/linear_boltzmann_solvers/solvers/time_dependent_solver.h"
+#include "modules/linear_boltzmann_solvers/solvers/transient_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/steady_state_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/pi_keigen_solver.h"
@@ -121,7 +123,7 @@ WrapLBS(py::module& slv)
     [](LBSProblem& self, bool only_scalar_flux)
     {
       py::list field_function_list_per_group;
-      for (std::size_t group = 0; group < self.GetNumGroups(); group++)
+      for (unsigned int group = 0; group < self.GetNumGroups(); group++)
       {
         if (only_scalar_flux)
         {
@@ -170,6 +172,20 @@ WrapLBS(py::module& slv)
     &LBSProblem::GetPowerFieldFunction,
     R"(
     Returns the power generation field function, if enabled.
+    )"
+  );
+  lbs_problem.def(
+    "GetTime",
+    &LBSProblem::GetTime,
+    R"(
+    Get the current simulation time in seconds.
+    )"
+  );
+  lbs_problem.def(
+    "GetTimeStep",
+    &LBSProblem::GetTimeStep,
+    R"(
+    Get the current timestep size.
     )"
   );
   lbs_problem.def(
@@ -272,6 +288,77 @@ WrapLBS(py::module& slv)
         If `scalar_flux_iterate` is not 'old' or 'new'.
     )",
     py::arg("scalar_flux_iterate")
+  );
+  lbs_problem.def(
+    "ComputeFissionProduction",
+    [](LBSProblem& self, const std::string& scalar_flux_iterate)
+    {
+      const std::vector<double>* phi_ptr = nullptr;
+      if (scalar_flux_iterate == "old")
+      {
+        phi_ptr = &self.GetPhiOldLocal();
+      }
+      else if (scalar_flux_iterate == "new")
+      {
+        phi_ptr = &self.GetPhiNewLocal();
+      }
+      else
+      {
+        throw std::invalid_argument("Unknown scalar_flux_iterate value: \"" + scalar_flux_iterate + "\".");
+      }
+      return ComputeFissionProduction(self, *phi_ptr);
+    },
+    R"(
+    Computes the total fission production (nu*fission).
+
+    Parameters
+    ----------
+    scalar_flux_iterate : {'old', 'new'}
+        Specifies which scalar flux vector to use in the calculation.
+            - 'old': Use the previous scalar flux iterate.
+            - 'new': Use the current scalar flux iterate.
+
+    Returns
+    -------
+    float
+        The total fission production.
+
+    Raises
+    ------
+    ValueError
+        If `scalar_flux_iterate` is not 'old' or 'new'.
+    )",
+    py::arg("scalar_flux_iterate")
+  );
+  lbs_problem.def(
+    "GetPhiOldLocal",
+    [](LBSProblem& self)
+    {
+      return convert_vector(self.GetPhiOldLocal());
+    },
+    R"(
+    Get the previous scalar flux iterate (local vector).
+
+    Returns
+    -------
+    memoryview
+        Memory view of the local old scalar flux vector.
+    )"
+  );
+  lbs_problem.def(
+    "GetPhiNewLocal",
+    [](LBSProblem& self)
+    {
+      return convert_vector(self.GetPhiNewLocal());
+    },
+    R"(
+    Get the current scalar flux iterate (local vector).
+
+    Returns
+    -------
+    memoryview
+        Memory view of the local new scalar flux vector.
+    )"
   );
   lbs_problem.def(
     "WriteFluxMoments",
@@ -677,8 +764,6 @@ WrapLBS(py::module& slv)
     use_gpus : bool, default=False
         A flag specifying whether GPU acceleration is used for the sweep. Currently, only ``AAH`` is
         supported.
-    time_dependent : bool, default=False
-        Enable time-dependent sweeps. Currently only supported with ``sweep_type="AAH"``.
     )"
   );
   do_problem.def(
@@ -768,6 +853,9 @@ WrapLBS(py::module& slv)
       // get the supported boundaries
       std::map<std::string, std::uint64_t> allowed_bd_names = grid->GetBoundaryNameMap();
       std::map<std::uint64_t, std::string> allowed_bd_ids = grid->GetBoundaryIDMap();
+      const auto coord_sys = grid->GetCoordinateSystem();
+      const auto mesh_type = grid->GetType();
+      const auto dim = grid->GetDimension();
       // get the boundaries to parse, preserving user order
       std::vector<std::uint64_t> bndry_ids;
       if (bnd_names.size() > 1)
@@ -775,6 +863,21 @@ WrapLBS(py::module& slv)
         for (py::handle name : bnd_names)
         {
           auto sname = name.cast<std::string>();
+          if (coord_sys == CoordinateSystemType::CYLINDRICAL && dim == 2)
+          {
+            if (sname == "xmin" || sname == "xmax" || sname == "ymin" || sname == "ymax")
+              throw std::runtime_error("ComputeLeakage: Boundary name '" + sname +
+                                       "' is invalid for cylindrical orthogonal meshes. "
+                                       "Use rmin, rmax, zmin, zmax.");
+
+            if (mesh_type == MeshType::ORTHOGONAL)
+            {
+              if (sname == "rmin") sname = "xmin";
+              else if (sname == "rmax") sname = "xmax";
+              else if (sname == "zmin") sname = "ymin";
+              else if (sname == "zmax") sname = "ymax";
+            }
+          }
           bndry_ids.push_back(allowed_bd_names.at(sname));
         }
       }
@@ -784,6 +887,18 @@ WrapLBS(py::module& slv)
       }
       // compute the leakage
       std::map<std::uint64_t, std::vector<double>> leakage = ComputeLeakage(self, bndry_ids);
+      const bool rz_ortho = (coord_sys == CoordinateSystemType::CYLINDRICAL &&
+                             mesh_type == MeshType::ORTHOGONAL && dim == 2);
+
+      auto to_rz_name = [](const std::string& name)
+      {
+        if (name == "xmin") return std::string("rmin");
+        if (name == "xmax") return std::string("rmax");
+        if (name == "ymin") return std::string("zmin");
+        if (name == "ymax") return std::string("zmax");
+        return name;
+      };
+
       // convert result to native Python
       py::dict result;
       for (const auto& bndry_id : bndry_ids)
@@ -797,7 +912,9 @@ WrapLBS(py::module& slv)
         auto buffer = np_vector.request();
         auto *np_vector_data = static_cast<double*>(buffer.ptr);
         std::copy(grp_wise_leakage.begin(), grp_wise_leakage.end(), np_vector_data);
-        const std::string& name = allowed_bd_ids.at(bndry_id);
+        std::string name = allowed_bd_ids.at(bndry_id);
+        if (rz_ortho)
+          name = to_rz_name(name);
         result[py::str(name)] = std::move(np_vector);
       }
 
@@ -949,8 +1066,6 @@ WrapLBS(py::module& slv)
           - field_function_prefix: str, default=''
     sweep_type : str, optional
         The sweep type to use. Must be one of `AAH` or `CBC`. Defaults to `AAH`.
-    time_dependent : bool, default=False
-        Enable time-dependent sweeps. Currently only supported with ``sweep_type="AAH"``.
     )"
   );
 }
@@ -987,6 +1102,122 @@ WrapSteadyState(py::module& slv)
         Existing LBSProblem instance.
     )"
   );
+  // clang-format on
+}
+
+// Wrap transient solver
+void
+WrapTransient(py::module& slv)
+{
+  // clang-format off
+  auto transient_solver =
+    py::class_<TransientSolver, std::shared_ptr<TransientSolver>, Solver>(
+      slv,
+      "TransientSolver",
+      R"(
+      Transient solver.
+
+      Wrapper of :cpp:class:`opensn::TransientSolver`.
+      )"
+    );
+  transient_solver.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        return TransientSolver::Create(kwargs_to_param_block(params));
+      }
+    ),
+    R"(
+    Construct a transient solver.
+
+    Parameters
+    ----------
+    pyopensn.solver.DiscreteOrdinatesProblem : DiscreteOrdinatesProblem
+        Existing discrete ordinates problem instance.
+    dt : float, optional, default=2.0e-3
+        Time step size used during the simulation.
+    stop_time : float, optional, default=0.1
+        Simulation end time.
+    theta : float, optional, default=0.5
+        Time differencing scheme parameter.
+    initial_state : str, optional, default="existing"
+        Initial state for the transient solve. Allowed values: existing, zero.
+        In "zero" mode, the solver may initialize the problem internally if needed.
+    verbose : bool, optional, default=True
+        Enable verbose logging.
+    )"
+  );
+  transient_solver.def(
+    "SetTimeStep",
+    &TransientSolver::SetTimeStep,
+    R"(
+    Set the timestep size used by :meth:`Advance`.
+
+    Parameters
+    ----------
+    dt : float
+        New timestep size.
+    )");
+  transient_solver.def(
+    "SetTheta",
+    &TransientSolver::SetTheta,
+    R"(
+    Set the theta parameter used by :meth:`Advance`.
+
+    Parameters
+    ----------
+    theta : float
+        Theta value between 1.0e-16 and 1.
+    )");
+  transient_solver.def(
+    "Advance",
+    &TransientSolver::Advance,
+    R"(
+    Advance the solver by a single timestep.
+
+    Notes
+    -----
+    You must call :meth:`Initialize` before calling :meth:`Advance` or
+    :meth:`Execute`.
+    )");
+  transient_solver.def(
+    "SetPreAdvanceCallback",
+    static_cast<void (TransientSolver::*)(std::function<void()>)>(
+      &TransientSolver::SetPreAdvanceCallback),
+    R"(
+    Register a callback that runs before each advance within :meth:`Execute`.
+
+    Parameters
+    ----------
+    callback : Optional[Callable[[], None]]
+        Function invoked before the solver advances a timestep. Pass None to clear.
+        If the callback modifies the timestep, the new value is used for the
+        upcoming step.
+    )");
+  transient_solver.def(
+    "SetPreAdvanceCallback",
+    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
+      &TransientSolver::SetPreAdvanceCallback),
+    "Clear the PreAdvance callback by passing None.");
+  transient_solver.def(
+    "SetPostAdvanceCallback",
+    static_cast<void (TransientSolver::*)(std::function<void()>)>(
+      &TransientSolver::SetPostAdvanceCallback),
+    R"(
+    Register a callback that runs after each advance within :meth:`Execute`.
+
+    Parameters
+    ----------
+    callback : Optional[Callable[[], None]]
+        Function invoked after the solver advances a timestep. Pass None to clear.
+    )");
+  transient_solver.def(
+    "SetPostAdvanceCallback",
+    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
+      &TransientSolver::SetPostAdvanceCallback),
+    "Clear the PostAdvance callback by passing None.");
+  slv.attr("BackwardEuler") = 1.0;
+  slv.attr("CrankNicolson") = 0.5;
   // clang-format on
 }
 
@@ -1068,6 +1299,8 @@ WrapTimeDependent(py::module& slv)
     ----------
     callback : Optional[Callable[[], None]]
         Function invoked before the solver advances a timestep. Pass None to clear.
+        If the callback modifies the timestep, the new value is used for the
+        upcoming step.
     )");
   time_dependent_solver.def(
     "SetPreAdvanceCallback",
@@ -1335,6 +1568,7 @@ py_solver(py::module& pyopensn)
   WrapSolver(slv);
   WrapLBS(slv);
   WrapSteadyState(slv);
+  WrapTransient(slv);
   WrapTimeDependent(slv);
   WrapNLKEigen(slv);
   WrapDiscreteOrdinatesKEigenAcceleration(slv);
