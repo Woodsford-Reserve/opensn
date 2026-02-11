@@ -89,13 +89,6 @@ private:
                        bool& intersection_found,
                        bool& backward_tolerance_hit,
                        RayTracerOutputInformation& oi);
-
-  const std::shared_ptr<MeshContinuum> reference_grid_;
-  std::vector<double> cell_sizes_;
-  double epsilon_nudge_ = 1.0e-8;
-  double backward_tolerance_ = 1.0e-10;
-  double extension_distance_ = 1.0e5;
-  bool perform_concavity_checks_ = true;
 };
 
 /**
