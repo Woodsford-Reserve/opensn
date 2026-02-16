@@ -21,6 +21,7 @@
 #include <utility>
 #include <unordered_map>
 #include <cmath>
+#include <algorithm>
 
 namespace opensn
 {
@@ -189,7 +190,12 @@ UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
         if (face.has_neighbor)
         {
           const auto weight = 0.;
-          cell_successors[c].insert(std::make_pair(face.GetNeighborLocalID(grid_.get()), weight));
+          cell_successors[c].insert(
+            std::make_pair(
+                face.GetNeighborLocalID(grid_.get()), 
+                weight
+              )
+            );
         }
       }
 
@@ -226,8 +232,8 @@ UncollidedProblem::Execute()
 
     // Ensure point source is inside near-source region
     const auto pt_loc = pt->GetLocation();
-    if (!near_source_logvols_[i]->Inside(pt_loc))
-      throw std::runtime_error("One or more point sources is outside "
+    if ( !near_source_logvols_[i]->Inside(pt_loc) )
+      throw std::runtime_error("One or more point sources lies outside "
                                "its near-source region.");
 
     // Initialize uncollided flux and moment vector
@@ -266,7 +272,7 @@ UncollidedProblem::Execute()
     
     // Calculate uncollided flux
     RaytraceNearSourceRegion(pt);
-    SweepBulkRegion(pt_loc);
+    if (bulk_spls_.size() != 0) SweepBulkRegion(pt_loc);
 
     // Update balance parameters
     UpdateBalance(pt);
@@ -336,17 +342,19 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
       if (orientation == FOOUTGOING)
       {
         // Face data
-        const Vector3& normal = cell.faces[f].normal;
+        const auto& face = cell.faces[f];
+
+        const Vector3& normal = face.normal;
         const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
 
-        double leakage = 0.;
         for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
         {
           // Raytrace to point
           Vector3 qp_xyz = fe_srf_data.QPointXYZ(qp);
           Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
 
-          std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, pt_loc, strength);
+          std::vector<double> 
+          phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, pt_loc, strength);
 
           // Compute leakage
           double integrand = (*swf)(fe_srf_data.QPointXYZ(qp))
@@ -356,7 +364,64 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
           for (size_t g = 0; g < num_groups_; ++g)
             face_leakage[g] += phi_qp[g] * integrand;
         }
-      }
+
+
+        if (face.has_neighbor)
+        {
+          size_t neighbor_id = face.neighbor_id;
+
+          // Near-source/bulk region interface
+          if (std::find( bulk_spls_.begin(),
+                         bulk_spls_.end(),
+                         neighbor_id ) != bulk_spls_.end())
+          {
+            // Face data
+            const size_t num_face_nodes = cell_mapping.GetNumFaceNodes(f);
+            const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
+
+            // Neighbor data
+            const Cell& neighbor = grid_->local_cells[neighbor_id];
+            const auto& neighbor_mapping = sdm.GetCellMapping(neighbor);
+
+            size_t f_ = face.GetNeighborAdjacentFaceIndex(grid_.get());
+
+            for (size_t fi = 0; fi < num_face_nodes; ++fi)
+            {
+              const int i = cell_mapping.MapFaceNode(f, fi);
+
+              int j = -1;
+              for (size_t fj = 0; fj < num_face_nodes; ++fj)
+              {
+                j = neighbor_mapping.MapFaceNode(f_, fj);
+                if (neighbor.vertex_ids[j] == cell.vertex_ids[i]) break;
+              }
+
+              // Compute rhs for bulk region sweep
+              const auto jr = sdm.MapDOFLocal(neighbor, j);
+              for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+              {
+                // Raytrace to quadrature point
+                const Vector3& qp_xyz = fe_srf_data.QPointXYZ(qp);
+                Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
+
+                std::vector<double> 
+                phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, pt_loc, strength);
+
+                // Compute rhs vector
+                double integrand = (*swf)(qp_xyz)
+                                 * omega.Dot( face.normal )
+                                 * fe_srf_data.ShapeValue(i, qp)
+                                 * fe_srf_data.JxW(qp);
+
+                for (size_t g = 0; g < num_groups_; ++g)
+                  destination_phi_[jr * num_groups_ + g] += phi_qp[g] * integrand;
+
+              } // for qp
+            } // for fi
+          } // if neighbor_id in bulk_spls_
+        } // if face.has_neighbor
+      } // if outgoing
+      
 
       // Retrieve leakage in from incoming face
       else if (orientation == FOINCOMING)
@@ -376,14 +441,16 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
 
     // Mass matrix times least-squares flux vector
     Phi_.assign(num_groups_, Vector<double>(cell_num_nodes, 0.));
-    for (unsigned int i = 0; i < cell_num_nodes; ++i)
+    for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
     {
-      for (const auto& qp : fe_vol_data.GetQuadraturePointIndices()) 
-      {
-        // Raytrace to point
-        Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
-        std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, pt_loc, strength);
+      // Raytrace to point
+      Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
 
+      std::vector<double> 
+      phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, pt_loc, strength);
+
+      for (unsigned int i = 0; i < cell_num_nodes; ++i)
+      {
         // Integrand value at quadrature point
         double integrand = (*swf)(fe_vol_data.QPointXYZ(qp))
                          * fe_vol_data.ShapeValue(i, qp)
@@ -393,12 +460,14 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
         for (size_t g = 0; g < num_groups_; ++g) 
           Phi_[g](i) += phi_qp[g] * integrand;
       }
-    }
+    } 
 
     // Invert mass matrix
-    M_ = unit_cell_matrices_[c].intV_shapeI_shapeJ;
     for (size_t g = 0; g < num_groups_; ++g) 
+    {
+      M_ = unit_cell_matrices_[c].intV_shapeI_shapeJ;
       GaussElimination(M_, Phi_[g], static_cast<int>(cell_num_nodes));
+    }
     
 
     // Transport view
@@ -449,19 +518,67 @@ UncollidedProblem::RaytraceNearSourceRegion(const PointSource* point_source)
     // Rescale solution
     for (size_t g = 0; g < num_groups_; ++g)
     {
-      double alpha = source[g] / sink[g];
+      double alpha = (sink[g] == 0.) ? 1. : (source[g] / sink[g]);
 
+      // Rescale flux
       for (size_t i = 0; i < cell_num_nodes; ++i) Phi_[g](i) *= alpha;
 
+      // Rescale leakage
       for (size_t f = 0; f < cell_num_faces; ++f)
-        if (cell_face_orientations_[c][f] == FOOUTGOING) leakages[c][f][g] *= alpha;
+      {
+        const auto& face = cell.faces[f];
+
+        if (cell_face_orientations_[c][f] == FOOUTGOING)
+        {
+          leakages[c][f][g] *= alpha;
+
+          // Near-source/bulk region interface
+          if (face.has_neighbor)
+          {
+            size_t neighbor_id = face.neighbor_id;
+
+            if (std::find( bulk_spls_.begin(),
+                           bulk_spls_.end(),
+                           neighbor_id ) != bulk_spls_.end())
+            {
+              // Neighbor data
+              const Cell& neighbor = grid_->local_cells[neighbor_id];
+              const auto& neighbor_mapping = sdm.GetCellMapping(neighbor);
+
+              // Rescale rhs vector
+              size_t num_neighbor_nodes = neighbor_mapping.GetNumNodes();
+              for (size_t i = 0; i < num_neighbor_nodes; ++i)
+              {
+                const auto ir = sdm.MapDOFLocal(neighbor, i);
+                destination_phi_[ir * num_groups_ + g] *= alpha;
+
+              } // for i
+            } // if neighbor in bulk_spls_
+          } // if face.has_neighbor
+        } // if outgoing
+
+        // Boundary outflow
+        if (not face.has_neighbor)
+          out_flow_ += leakages[c][f][g];
+
+      } // for f
     }
 
     // Update flux solution
     for (size_t i = 0; i < cell_num_nodes; ++i) 
     {
       const auto ir = sdm.MapDOFLocal(cell, i);
-      for (size_t g = 0; g < num_groups_; ++g) destination_phi_[ir + g] = Phi_[g](i);
+      for (size_t g = 0; g < num_groups_; ++g) 
+        destination_phi_[ir * num_groups_ + g] = Phi_[g](i);
+    }
+
+    for (size_t i = 0; i < cell_num_nodes; ++i) 
+    {
+      const auto ir = sdm.MapDOFLocal(cell, i);
+
+      double phi_i = 0.;
+      for (size_t g = 0; g < num_groups_; ++g) 
+        phi_i += destination_phi_[ir * num_groups_ + g];
     }
   }
 }
@@ -476,14 +593,16 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
                                 const double tolerance)
 {
   // Uncollided flux analytical value
-  auto phi_ex = [this](double q0, double d, double mfp) {
+  auto phi_ex = [this](double q0, double d, double mfp) 
+  {
     if (grid_->GetDimension() == 2)
       return q0 / (2.*M_PI * d) * std::exp(-mfp);
+
     return q0 / (4.*M_PI * d*d) * std::exp(-mfp);
   };
 
   // Uncollided flux values at quadrature point
-  std::vector<double> phi (num_groups_, 0.);
+  std::vector<double> phi(num_groups_, 0.);
 
   // Direction vector
   Vector3 omega = ComputeOmega(qp_xyz, pt_loc);
@@ -534,7 +653,7 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
       mfp[g] += sigma_t[g] * length;
   }
 
-  for(size_t g = 0; g < num_groups_; ++g) 
+  for (size_t g = 0; g < num_groups_; ++g) 
     phi[g] = phi_ex(strength[g], total_length, mfp[g]);
 
   return phi;
@@ -594,31 +713,51 @@ UncollidedProblem::SweepBulkRegion(const Vector3& pt_loc)
       if (cell_face_orientations_[c][f] == FaceOrientation::INCOMING)
       {
         size_t neighbor_id = cell.faces[f].neighbor_id;
-        size_t f_ = cell.faces[f].GetNeighborAdjacentFaceIndex(grid_.get());
 
-        const Cell& neighbor = grid_->local_cells[neighbor_id];
-        const auto& neighbor_mapping = sdm.GetCellMapping(neighbor);
-
-        for (size_t fi = 0; fi < num_face_nodes; ++fi)
+        // Near-source/bulk region interface
+        if (std::find( near_spls_.begin(),
+                       near_spls_.end(),
+                       neighbor_id) != near_spls_.end())
         {
-          const int i = cell_mapping.MapFaceNode(f, fi);
-
-          for (size_t fj = 0; fj < num_face_nodes; ++fj)
+          for (size_t i = 0; i < cell_num_nodes; ++i)
           {
-            const int j = cell_mapping.MapFaceNode(f, fj);            
-
-            int k;
-            for (size_t fk = 0; fk < num_face_nodes; ++fk)
+            for (size_t g = 0; g < num_groups_; ++g)
             {
-              k = neighbor_mapping.MapFaceNode(f_, fk);
-              if (neighbor.vertex_ids[k] == cell.vertex_ids[j]) break;
+              const auto ir = sdm.MapDOFLocal(cell, i);
+              Phi_[g](i) += destination_phi_[ir * num_groups_ + g];
             }
+          }
+        }
+          
+        // Bulk region cell neighbor
+        else
+        {
+          size_t f_ = cell.faces[f].GetNeighborAdjacentFaceIndex(grid_.get());
 
-            const auto jr = sdm.MapDOFLocal(neighbor, k);
-            for (size_t g = 0; g < num_groups_; ++g) 
+          const Cell& neighbor = grid_->local_cells[neighbor_id];
+          const auto& neighbor_mapping = sdm.GetCellMapping(neighbor);
+
+          for (size_t fi = 0; fi < num_face_nodes; ++fi)
+          {
+            const int i = cell_mapping.MapFaceNode(f, fi);
+
+            for (size_t fj = 0; fj < num_face_nodes; ++fj)
             {
-              double phi_j = destination_phi_[jr + g];
-              Phi_[g](i) -= M_surf_(i, j) * phi_j;
+              const int j = cell_mapping.MapFaceNode(f, fj);            
+
+              int k = -1;
+              for (size_t fk = 0; fk < num_face_nodes; ++fk)
+              {
+                k = neighbor_mapping.MapFaceNode(f_, fk);
+                if (neighbor.vertex_ids[k] == cell.vertex_ids[j]) break;
+              }
+
+              const auto jr = sdm.MapDOFLocal(neighbor, k);
+              for (size_t g = 0; g < num_groups_; ++g) 
+              {
+                double phi_j = destination_phi_[jr * num_groups_ + g];
+                Phi_[g](i) -= M_surf_(i, j) * phi_j;
+              }
             }
           }
         }
@@ -658,7 +797,8 @@ UncollidedProblem::SweepBulkRegion(const Vector3& pt_loc)
     for (size_t i = 0; i < cell_num_nodes; ++i)
     {
       const auto ir = sdm.MapDOFLocal(cell, i);
-      for (size_t g = 0; g < num_groups_; ++g) destination_phi_[ir + g] = Phi_[g](i);
+      for (size_t g = 0; g < num_groups_; ++g) 
+        destination_phi_[ir * num_groups_ + g] = Phi_[g](i);
     }
   }
 }
@@ -776,7 +916,7 @@ UncollidedProblem::UpdateBalance(const PointSource* point_source)
       for (size_t i = 0; i < cell_num_nodes; ++i)
       {
         const auto ir = sdm.MapDOFLocal(cell, i);
-        double phi_ig = destination_phi_[ir + g];
+        double phi_ig = destination_phi_[ir * num_groups_ + g];
 
         removal_ += sigma_t[g] * phi_ig * IntV_shapeI(i);
       }
@@ -790,34 +930,39 @@ UncollidedProblem::UpdateBalance(const PointSource* point_source)
       // Compute leakage out of outgoing face
       if (not face.has_neighbor)
       { 
-        // Face data
-        const Vector3& normal = cell.faces[f].normal;
-        const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
-        
-        for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+        if (std::find( bulk_spls_.begin(),
+                       bulk_spls_.end(),
+                       cell.local_id ) != bulk_spls_.end())
         {
-          // Raytrace to point
-          Vector3 qp_xyz = fe_srf_data.QPointXYZ(qp);
-          Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
-
-          // Compute outflow
-          double integrand = (*swf)(fe_srf_data.QPointXYZ(qp))
-                           * omega.Dot(normal) 
-                           * fe_srf_data.JxW(qp);
+          // Face data
+          const Vector3& normal = cell.faces[f].normal;
+          const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
           
-          for (size_t g = 0; g < num_groups_; ++g)
+          for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
           {
-            // Flux at quadrature point
-            for (size_t i = 0; i < cell_num_nodes; ++i)
-            {
-              const auto ir = sdm.MapDOFLocal(cell, i);
-              double phi_ig = destination_phi_[ir + g];
+            // Raytrace to point
+            Vector3 qp_xyz = fe_srf_data.QPointXYZ(qp);
+            Vector3 omega = ComputeOmega(pt_loc, qp_xyz);
 
-              out_flow_ += phi_ig * integrand 
-                         * fe_srf_data.ShapeValue(i, qp); 
-            }
-          } // for g
-        } // for qp 
+            // Compute outflow
+            double integrand = (*swf)(fe_srf_data.QPointXYZ(qp))
+                             * omega.Dot(normal) 
+                             * fe_srf_data.JxW(qp);
+            
+            for (size_t g = 0; g < num_groups_; ++g)
+            {
+              // Flux at quadrature point
+              for (size_t i = 0; i < cell_num_nodes; ++i)
+              {
+                const auto ir = sdm.MapDOFLocal(cell, i);
+                double phi_ig = destination_phi_[ir * num_groups_ + g];
+
+                out_flow_ += phi_ig * integrand 
+                           * fe_srf_data.ShapeValue(i, qp); 
+              }
+            } // for g
+          } // for qp
+        } // if cell id in bulk_spls_
       } // if not has_neighbor
     } // for f
   } // for cell
@@ -907,15 +1052,16 @@ UncollidedProblem::ComputeMoment(unsigned int ell,
       double varphi = sgn * std::acos(omega.x 
                     / std::sqrt(omega.x*omega.x 
                               + omega.y*omega.y));
+                              
+      const auto ir = sdm.MapDOFLocal(cell, i);
 
       // Compute l,m harmonic moment of uncollided flux
       for (size_t g = 0; g < num_groups_; ++g)
       {
-        const auto ir = sdm.MapDOFLocal(cell, i);
-        double phi_ig = destination_phi_[ir + g];
-
+        double phi_ig = destination_phi_[ir * num_groups_ + g];
         double phi_lm = phi_ig * Ylm(ell, m, varphi, theta);
-        flux_moment_[ir + g] = phi_lm;
+
+        flux_moment_[ir * num_groups_ + g] = phi_lm;
 
       } // for g
     } // for i
