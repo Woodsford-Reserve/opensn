@@ -66,6 +66,9 @@ SteadyStateSourceSolver::Execute()
   auto& ags_solver = *lbs_problem_->GetAGSSolver();
   ags_solver.Solve();
 
+  if (lbs_problem_->DoUncollidedProblem())
+    lbs_problem_->ComputeFluxFromUncollided();
+
   if (options.restart_writes_enabled)
     WriteRestartData();
 

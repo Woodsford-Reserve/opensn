@@ -9,6 +9,7 @@
 #include "framework/parameters/parameter_block.h"
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace opensn
 {
@@ -96,6 +97,9 @@ public:
   void CopyPhiAndSrcToDevice();
   void CopyPhiAndOutflowBackToHost();
 
+  // Compute total flux from uncollided and collided fluxes
+  void ComputeFluxFromUncollided();
+
 protected:
   explicit DiscreteOrdinatesProblem(const std::string& name,
                                     std::shared_ptr<MeshContinuum> grid_ptr);
@@ -146,6 +150,8 @@ protected:
   std::map<uint64_t, BoundaryDefinition> boundary_definitions_;
   std::optional<ParameterBlock> boundary_conditions_block_;
 
+  std::string uncollided_flux_file_;
+
   /// Max level size.
   std::size_t max_level_size_ = 0;
   /// Max angle-set size.
@@ -158,6 +164,8 @@ protected:
   std::vector<std::vector<double>> psi_new_local_;
   std::vector<std::vector<double>> psi_old_local_;
   std::optional<SweepChunkMode> sweep_chunk_mode_;
+
+  void InitializeFCS();
 
 private:
   void CreateAAHD_FLUDSCommonData();

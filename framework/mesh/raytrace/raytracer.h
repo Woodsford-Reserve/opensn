@@ -166,14 +166,14 @@ bool CheckPlaneTetIntersect(const Vector3& plane_normal,
                             const std::vector<Vector3>& tet_points);
 
 bool CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
-                               const std::vector<size_t>& vertex_ids,
+                               const std::vector<uint64_t>& vertex_ids,
                                const Vector3& line_point0,
                                const Vector3& line_point1,
                                const double tolerance,
                                const double nudge,
                                Vector3& intersection_point,
                                double& distance_to_intersection,
-                               size_t& neighbor_id);
+                               uint64_t& neighbor_id);
 
 /// Populates segment lengths along a ray. Sorted along the direction.
 void PopulateRaySegmentLengths(std::shared_ptr<MeshContinuum> grid,

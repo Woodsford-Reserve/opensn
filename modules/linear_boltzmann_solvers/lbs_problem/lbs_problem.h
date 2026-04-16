@@ -262,6 +262,15 @@ public:
 
   virtual void UpdatePsiOld() {};
 
+  // Do uncollided flux calculation
+  bool DoUncollidedProblem() const 
+  {
+    return do_uncollided_;
+  }
+
+  // Compute total flux from uncollided and collided fluxes
+  virtual void ComputeFluxFromUncollided() {};
+
 protected:
   virtual void PrintSimHeader();
 
@@ -339,6 +348,8 @@ protected:
 
   std::map<std::pair<unsigned int, size_t>, size_t> phi_field_functions_local_map_;
   size_t power_gen_fieldfunc_local_handle_ = 0;
+
+  bool do_uncollided_ = false;
 
   /**
    * \brief Data carriers for necessary data to run the sweep on GPU.

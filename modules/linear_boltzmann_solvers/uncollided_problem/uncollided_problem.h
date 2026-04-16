@@ -13,6 +13,7 @@
 #include "framework/data_types/vector.h"
 #include "framework/data_types/vector3.h"
 #include "hdf5.h"
+#include <string>
 
 namespace opensn
 {
@@ -111,7 +112,9 @@ protected:
 
   std::vector<double> destination_phi_;
 
-  unsigned int scattering_order_ = 0;
+  std::string uncollided_flux_file_; 
+
+  unsigned int ell_max_ = 0;
   std::vector<double> flux_moment_;
 
   double production_ = 0.;
