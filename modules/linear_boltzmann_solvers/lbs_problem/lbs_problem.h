@@ -284,6 +284,15 @@ public:
    */
   virtual void ReorientAdjointSolution() {};
 
+  // Do uncollided flux calculation
+  bool DoUncollidedProblem() const 
+  {
+    return do_uncollided_;
+  }
+
+  // Compute total flux from uncollided and collided fluxes
+  virtual void ComputeFluxFromUncollided() {};
+
 protected:
   /// Input parameters based construction.
   explicit LBSProblem(const InputParameters& params);
@@ -358,6 +367,8 @@ protected:
   SetSourceFunction active_set_source_function_;
 
   bool initialized_ = false;
+
+  bool do_uncollided_ = false;
 
   /// Data carriers needed to run the sweep on GPU.
   std::shared_ptr<TotalXSCarrier> total_xs_carrier_ = nullptr;

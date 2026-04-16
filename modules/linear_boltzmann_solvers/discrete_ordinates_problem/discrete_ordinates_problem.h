@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <tuple>
+#include <string>
 
 namespace opensn
 {
@@ -136,6 +137,9 @@ public:
   void CopyPhiAndSrcToDevice();
   void CopyPhiAndOutflowBackToHost();
 
+  // Compute total flux from uncollided and collided fluxes
+  void ComputeFluxFromUncollided();
+
 protected:
   /// Factory-only constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
@@ -195,6 +199,8 @@ protected:
   std::map<uint64_t, BoundaryDefinition> boundary_definitions_;
   std::optional<ParameterBlock> boundary_conditions_block_;
 
+  std::string uncollided_flux_file_;
+
   /// Max level size.
   std::size_t max_level_size_ = 0;
   /// Max angle-set size.
@@ -210,6 +216,8 @@ protected:
   std::shared_ptr<AGSLinearSolver> ags_solver_;
   std::vector<std::shared_ptr<WGSContext>> wgs_contexts_;
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
+
+  void InitializeFCS();
 
 private:
   std::string

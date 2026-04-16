@@ -46,9 +46,12 @@ UncollidedProblem::GetInputParameters()
   params.AddRequiredParameterArray("near_source",
                                    "List of near source region logical volumes.");
 
+  params.AddRequiredParameter<std::string>("file_name",
+                                           "Uncollided flux h5 file name.");
+
   params.AddOptionalParameter("scattering_order",
                               0,
-                              "The scattering order of collided flux problem.");
+                              "The scattering order of the collided flux problem.");
 
   return params;
 }
@@ -63,9 +66,12 @@ UncollidedProblem::Create(const ParameterBlock& params)
 
 UncollidedProblem::UncollidedProblem(const InputParameters& params)
   : LBSProblem(params),
-    scattering_order_(params.GetParamValue<size_t>("scattering_order"))
+    uncollided_flux_file_(params.GetParamValue<std::string>("file_name")),
+    ell_max_(params.GetParamValue<size_t>("scattering_order"))
 {
-  Initialize();
+  num_moments_ = 1;
+
+  LBSProblem::Initialize();
 
   InitializeNearSourceRegions(params);
 
@@ -211,12 +217,13 @@ UncollidedProblem::Execute()
   CALI_CXX_MARK_SCOPE("UncollidedProblem::Execute");
 
   // Create h5 file
-  std::string fname = "uncollided.h5";
+  std::string fname = uncollided_flux_file_;
   auto file = H5Fcreate(fname.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
-  size_t num_loc_cells = grid_->local_cells.size();
+  const auto& sdm = *discretization_;
 
-  size_t num_loc_nodes = discretization_->GetNumLocalNodes();
+  size_t num_loc_cells = grid_->local_cells.size();
+  size_t num_loc_nodes = sdm.GetNumLocalNodes();
   size_t num_loc_unknowns = num_loc_nodes * num_groups_;
 
   // Global cell IDs
@@ -225,14 +232,14 @@ UncollidedProblem::Execute()
   H5WriteDataset1D<size_t>(file, "cell ids", global_ids);
 
   // Loop over point sources
-  for (size_t i = 0; i < GetPointSources().size(); ++i) 
+  for (size_t ipt = 0; ipt < GetPointSources().size(); ++ipt) 
   {
-    const auto& point_source = point_sources_[i];
+    const auto& point_source = point_sources_[ipt];
     const auto pt = point_source.get();
 
     // Ensure point source is inside near-source region
     const auto pt_loc = pt->GetLocation();
-    if ( !near_source_logvols_[i]->Inside(pt_loc) )
+    if ( !near_source_logvols_[ipt]->Inside(pt_loc) )
       throw std::runtime_error("One or more point sources lies outside "
                                "its near-source region.");
 
@@ -266,13 +273,32 @@ UncollidedProblem::Execute()
 
     for (size_t c : spls_) {
       const auto& cell = grid_->local_cells[c];
-      if ( near_source_logvols_[i]->Inside(cell.centroid) ) near_spls_.push_back(c);
-      else                                                  bulk_spls_.push_back(c);
+      if ( near_source_logvols_[ipt]->Inside(cell.centroid) ) near_spls_.push_back(c);
+      else                                                    bulk_spls_.push_back(c);
     }
     
     // Calculate uncollided flux
     RaytraceNearSourceRegion(pt);
     if (bulk_spls_.size() != 0) SweepBulkRegion(pt_loc);
+
+    // Update phi_new_local_
+    for (auto& cell : grid_->local_cells)
+    {
+      const auto& cell_mapping = sdm.GetCellMapping(cell);
+      const size_t cell_num_nodes = cell_mapping.GetNumNodes();
+
+      for (size_t i = 0; i < cell_num_nodes; ++i)
+      {
+        const auto ir = sdm.MapDOFLocal(cell, i);
+
+        for (size_t g = 0; g < num_groups_; ++g)
+        {
+          phi_new_local_[ir * num_groups_ + g] 
+            += destination_phi_[ir * num_groups_ + g];
+        }
+      }
+    }
+    LBSProblem::UpdateFieldFunctions();
 
     // Update balance parameters
     UpdateBalance(pt);
@@ -982,7 +1008,7 @@ UncollidedProblem::WriteToH5File(hid_t file,
   else H5WriteDataset1D<double>(file, "0,0", destination_phi_);
 
   // Loop over moments
-  for (int ell = 1; ell <= scattering_order_; ++ell)
+  for (int ell = 1; ell <= ell_max_; ++ell)
   {
     for (int m = -ell; m <= ell; ++m)
     {

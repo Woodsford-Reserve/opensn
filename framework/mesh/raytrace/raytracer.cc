@@ -103,7 +103,7 @@ RayTracer::TraceRay(const Cell& cell, Vector3& pos_i, Vector3& omega_i, int func
       for (auto vid : face.vertex_ids)
       {
         size_t ref_cell_id = 0;
-        for (size_t cid = 0; cid < cell.vertex_ids.size(); ++cid)
+        for (uint64_t cid = 0; cid < cell.vertex_ids.size(); ++cid)
           if (cell.vertex_ids[cid] == vid)
             ref_cell_id = cid + 1;
 
@@ -588,16 +588,16 @@ CheckPlaneTetIntersect(const Vector3& plane_normal,
 
 bool 
 CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
-                          const std::vector<size_t>& vertex_ids,
+                          const std::vector<uint64_t>& vertex_ids,
                           const Vector3& line_point0,
                           const Vector3& line_point1,
                           const double tolerance,
                           const double nudge,
                           Vector3& intersection_point,
                           double& distance_to_intersection,
-                          size_t& neighbor_id)
+                          uint64_t& neighbor_id)
 {
-  for (size_t vertex_id : vertex_ids)
+  for (uint64_t vertex_id : vertex_ids)
   {
     const Vector3& vertex = grid->vertices[vertex_id];
 
@@ -619,7 +619,7 @@ CheckIntersectionAtVertex(std::shared_ptr<MeshContinuum> grid,
       {
         if (grid->CheckPointInsideCell(cell, nudged_point))
         {
-          neighbor_id = cell.local_id;
+          neighbor_id = cell.global_id;
           break;
         }
       }

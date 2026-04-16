@@ -697,6 +697,8 @@ WrapLBS(py::module& slv)
     ----------
     mesh : MeshContinuum
         The spatial mesh.
+    file_name : str 
+        Uncollided flux h5 file name.
     num_groups : int
         The total number of energy groups.
     xs_map : List[Dict], default=[]
@@ -848,6 +850,8 @@ WrapLBS(py::module& slv)
     use_gpus : bool, default=False
         A flag specifying whether GPU acceleration is used for the sweep. Currently, only ``AAH`` is
         supported.
+    uncollided_flux : str, default=""
+        Precomputed uncollided flux file used to construct a first collision source.
     )"
   );
   do_problem.def(

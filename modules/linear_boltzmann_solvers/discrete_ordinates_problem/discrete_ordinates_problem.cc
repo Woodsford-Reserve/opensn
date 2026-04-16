@@ -39,6 +39,8 @@
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
 #include "framework/utils/utils.h"
+#include "framework/utils/hdf_utils.h"
+#include "framework/object_factory.h"
 #include "framework/runtime.h"
 #include "caliper/cali.h"
 #include <algorithm>
@@ -47,6 +49,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace opensn
 {
@@ -78,6 +81,11 @@ DiscreteOrdinatesProblem::GetInputParameters()
                               false,
                               "If true, initializes the problem in time-dependent mode. "
                               "Requires `options.save_angular_flux=true`.");
+
+  params.AddOptionalParameter(
+    "uncollided_flux",
+    "",
+    "Optional precomputed uncollided flux file used to construct a first collision source.");
 
   return params;
 }
@@ -152,6 +160,15 @@ DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params
     const auto& bcs = params.GetParam("boundary_conditions");
     bcs.RequireBlockTypeIs(ParameterBlockType::ARRAY);
     boundary_conditions_block_ = bcs;
+  }
+
+  uncollided_flux_file_ = params.GetParamValue<std::string>("uncollided_flux");
+
+  if (use_gpus_ && sweep_type_ == "CBC")
+  {
+    log.Log0Warning() << "Sweep computation on GPUs is not supported for the CBC sweep."
+                      << "Falling back to CPU sweep.\n";
+    use_gpus_ = false;
   }
 
   // Check for consistency between quadrature sets
@@ -560,6 +577,7 @@ DiscreteOrdinatesProblem::BuildRuntime()
   }
 
   LBSProblem::BuildRuntime();
+  InitializeFCS();
 
   // Make face histogram
   grid_face_histogram_ = grid_->MakeGridFaceHistogram();
@@ -603,6 +621,172 @@ DiscreteOrdinatesProblem::BuildRuntime()
   }
   log.Log() << program_timer.GetTimeString() << " Initialized angle aggregation.";
   InitializeSolverSchemes();
+}
+
+void
+DiscreteOrdinatesProblem::InitializeFCS()
+{
+  CALI_CXX_MARK_SCOPE("DiscreteOrdinatesProblem::InitializeFCS");
+
+  if (uncollided_flux_file_.empty())
+    return;
+
+  do_uncollided_ = true;
+
+  const auto& file_name = uncollided_flux_file_;
+
+  const auto file_id = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+  OpenSnInvalidArgumentIf(file_id < 0,
+                          GetName() + ": failed to open uncollided flux file \"" + file_name +
+                            "\".");
+
+  try
+  {
+    std::vector<size_t> file_cell_ids;
+    H5ReadDataset1D<size_t>(file_id, "cell ids", file_cell_ids);
+
+    std::vector<double> phi_00;
+    H5ReadDataset1D<double>(file_id, "0,0", phi_00);
+    OpenSnInvalidArgumentIf(phi_00.size() % num_groups_ != 0,
+                            GetName() + ": dataset \"0,0\" in \"" + file_name +
+                              "\" has invalid size for num_groups=" +
+                              std::to_string(num_groups_) + ".");
+
+    std::unordered_map<uint64_t, size_t> cell_id_to_file_cell_index;
+    cell_id_to_file_cell_index.reserve(file_cell_ids.size());
+    for (size_t c = 0; c < file_cell_ids.size(); ++c)
+      cell_id_to_file_cell_index[file_cell_ids[c]] = c;
+
+    // Ensure fixed source moments exist and are active.
+    options_.use_src_moments = true;
+    const auto local_unknown_count = discretization_->GetNumLocalDOFs(flux_moments_uk_man_);
+    if (ext_src_moments_local_.size() != local_unknown_count)
+      ext_src_moments_local_.assign(local_unknown_count, 0.0);
+
+    OpenSnLogicalErrorIf(groupsets_.empty(), GetName() + ": no groupsets were configured.");
+    const auto& moment_to_harmonics =
+      groupsets_.front().quadrature->GetMomentToHarmonicsIndexMap();
+    OpenSnLogicalErrorIf(moment_to_harmonics.size() != num_moments_,
+                         GetName() + ": moments/harmonics map size mismatch.");
+
+    std::vector<double> uncollided_moment;
+    for (size_t m = 0; m < num_moments_; ++m)
+    {
+      const auto ell = moment_to_harmonics[m].ell;
+      const auto em = moment_to_harmonics[m].m;
+      const std::string dataset_name = std::to_string(ell) + "," + std::to_string(em);
+
+      H5ReadDataset1D<double>(file_id, dataset_name, uncollided_moment);
+      OpenSnInvalidArgumentIf(uncollided_moment.size() != phi_00.size(),
+                              GetName() + ": dataset \"" + dataset_name + "\" in \"" +
+                                file_name + "\" has size " +
+                                std::to_string(uncollided_moment.size()) + " but expected " +
+                                std::to_string(phi_00.size()) + ".");
+
+      for (const auto& cell : grid_->local_cells)
+      {
+        const auto file_cell_it = cell_id_to_file_cell_index.find(cell.global_id);
+        OpenSnInvalidArgumentIf(file_cell_it == cell_id_to_file_cell_index.end(),
+                                GetName() + ": local cell " + std::to_string(cell.global_id) +
+                                  " was not found in \"" + file_name + "\".");
+
+        const auto num_nodes = discretization_->GetCellNumNodes(cell);
+        const auto file_cell_offset = file_cell_it->second * num_nodes;
+        const auto& transport_view = cell_transport_views_[cell.local_id];
+        const auto& xs = transport_view.GetXS();
+        const auto& transfer_matrices = xs.GetTransferMatrices();
+        if (ell >= transfer_matrices.size())
+          continue;
+
+        const auto& S_ell = transfer_matrices[ell];
+        const auto rho = densities_local_[cell.local_id];
+        for (size_t i = 0; i < num_nodes; ++i)
+        {
+          const auto file_uk_map = (file_cell_offset + i) * num_groups_;
+          const auto lhs_uk_map = transport_view.MapDOF(i, m, 0);
+          for (size_t g = 0; g < num_groups_; ++g)
+          {
+            double rhs = 0.0;
+            for (const auto& [_, gp, sigma_sm] : S_ell.Row(g))
+            {
+              rhs += rho * sigma_sm * uncollided_moment[file_uk_map + gp];
+            }
+
+            ext_src_moments_local_[lhs_uk_map + g] += rhs;
+          }
+        }
+      }
+    }
+
+    H5Fclose(file_id);
+  }
+  catch (...)
+  {
+    H5Fclose(file_id);
+    throw;
+  }
+}
+
+void
+DiscreteOrdinatesProblem::ComputeFluxFromUncollided()
+{
+  if (uncollided_flux_file_.empty())
+    return;
+
+  const auto& file_name = uncollided_flux_file_;
+
+  const auto file_id = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+  OpenSnInvalidArgumentIf(file_id < 0,
+                          GetName() + ": failed to open uncollided flux file \"" + file_name +
+                            "\".");
+
+  try
+  {
+    std::vector<size_t> file_cell_ids;
+    H5ReadDataset1D<size_t>(file_id, "cell ids", file_cell_ids);
+
+    std::vector<double> phi_00;
+    H5ReadDataset1D<double>(file_id, "0,0", phi_00);
+    OpenSnInvalidArgumentIf(phi_00.size() % num_groups_ != 0,
+                            GetName() + ": dataset \"0,0\" in \"" + file_name +
+                              "\" has invalid size for num_groups=" +
+                              std::to_string(num_groups_) + ".");
+
+    std::unordered_map<uint64_t, size_t> cell_id_to_file_cell_index;
+    cell_id_to_file_cell_index.reserve(file_cell_ids.size());
+    for (size_t c = 0; c < file_cell_ids.size(); ++c)
+      cell_id_to_file_cell_index[file_cell_ids[c]] = c;
+
+    for (const auto& cell : grid_->local_cells)
+    {
+      const auto file_cell_it = cell_id_to_file_cell_index.find(cell.global_id);
+      OpenSnInvalidArgumentIf(file_cell_it == cell_id_to_file_cell_index.end(),
+                              GetName() + ": local cell " + std::to_string(cell.global_id) +
+                                " was not found in \"" + file_name + "\".");
+
+      const auto num_nodes = discretization_->GetCellNumNodes(cell);
+      const auto file_cell_offset = file_cell_it->second * num_nodes;
+      const auto& transport_view = cell_transport_views_[cell.local_id];
+
+      for (size_t i = 0; i < num_nodes; ++i)
+      {
+        const auto file_uk_map = (file_cell_offset + i) * num_groups_;
+        const auto lhs_uk_map = transport_view.MapDOF(i, 0, 0);
+
+        for (size_t g = 0; g < num_groups_; ++g)
+        {
+          phi_old_local_[lhs_uk_map + g] += phi_00[file_uk_map + g];
+        }
+      }
+    }
+
+    H5Fclose(file_id);
+  }
+  catch (...)
+  {
+    H5Fclose(file_id);
+    throw;
+  }
 }
 
 void
