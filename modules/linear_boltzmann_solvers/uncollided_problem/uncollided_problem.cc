@@ -271,7 +271,8 @@ UncollidedProblem::Execute()
     // Separate SPLS into near-source and bulk region
     near_spls_.clear(); bulk_spls_.clear();
 
-    for (size_t c : spls_) {
+    for (size_t c : spls_) 
+    {
       const auto& cell = grid_->local_cells[c];
       if ( near_source_logvols_[ipt]->Inside(cell.centroid) ) near_spls_.push_back(c);
       else                                                    bulk_spls_.push_back(c);

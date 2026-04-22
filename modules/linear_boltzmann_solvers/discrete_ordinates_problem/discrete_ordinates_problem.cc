@@ -775,7 +775,7 @@ DiscreteOrdinatesProblem::ComputeFluxFromUncollided()
 
         for (size_t g = 0; g < num_groups_; ++g)
         {
-          phi_old_local_[lhs_uk_map + g] += phi_00[file_uk_map + g];
+          phi_new_local_[lhs_uk_map + g] += phi_00[file_uk_map + g];
         }
       }
     }
