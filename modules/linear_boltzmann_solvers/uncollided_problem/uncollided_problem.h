@@ -63,6 +63,9 @@ protected:
   void PopulateCellRelationships(const Vector3& point_source,
                                  std::vector<std::set<std::pair<size_t, double>>>& cell_successors);
 
+  void ConstructSPLS(const std::vector<std::set<std::pair<size_t, double>>>& cell_successors,
+                     const size_t ipt);
+
   void InitializeNearSourceRegions(const InputParameters& params);
 
   void RaytraceNearSourceRegion(const PointSource* point_source);
