@@ -211,6 +211,79 @@ UncollidedProblem::PopulateCellRelationships(const Vector3& point_source,
 }
 
 
+void
+UncollidedProblem::ConstructSPLS(const std::vector<std::set<std::pair<size_t, double>>>& cell_successors,
+                                 const size_t ipt)
+{
+  size_t num_loc_cells = grid_->local_cells.size();
+
+  // Create local cell graph
+  Graph local_cell_graph(num_loc_cells);
+
+  for (size_t c = 0; c < num_loc_cells; ++c)
+    for (const auto& successor : cell_successors[c])
+      boost::add_edge(c, successor.first, successor.second, local_cell_graph);
+
+  // Generate topological ordering
+  spls_.clear();
+  boost::topological_sort(local_cell_graph, std::back_inserter(spls_)); // NOLINT
+  std::reverse(spls_.begin(), spls_.end());
+  if (spls_.empty())
+  {
+    throw std::logic_error("UncollidedProblem: Cyclic dependencies found "
+                            "in the local cell graph.");
+  }
+
+  // Near-source region cells
+  std::vector<size_t> near_source_cells_ {};
+  for (size_t cell_id : spls_) 
+  {
+    const auto& cell = grid_->local_cells[cell_id];
+
+    // Construct vector of near-source region cells
+    if ( near_source_logvols_[ipt]->Inside(cell.centroid) and 
+         std::find( near_source_cells_.begin(), 
+                    near_source_cells_.end(), 
+                    cell_id ) == near_source_cells_.end() )
+    {
+      // Append cells in near-source region not already in vector
+      near_source_cells_.push_back(cell_id);
+
+        // Append near-source region cell dependencies
+      const size_t cell_num_faces = cell.faces.size();
+      for (size_t f = 0; f < cell_num_faces; ++f)
+      {
+        const auto& face = cell.faces[f];
+
+        // Check for dependence on cells outside logical volume
+        if (face.has_neighbor and 
+            cell_face_orientations_[cell_id][f] == FaceOrientation::INCOMING)
+        {
+          size_t neigh_id = face.neighbor_id;
+          
+          if ( std::find( near_source_cells_.begin(), 
+                          near_source_cells_.end(), 
+                          neigh_id ) == near_source_cells_.end() )
+          {
+            near_source_cells_.push_back(neigh_id);
+          }
+        }
+      }
+    }
+  }
+
+  // Separate SPLS into near-source and bulk region
+  near_spls_.clear(); bulk_spls_.clear();
+  for (size_t cell_id : spls_) 
+  {
+    if ( std::find( near_source_cells_.begin(), 
+                    near_source_cells_.end(), 
+                    cell_id ) != near_source_cells_.end() ) near_spls_.push_back(cell_id);
+    else                                                    bulk_spls_.push_back(cell_id);
+  }
+}
+
+
 void 
 UncollidedProblem::Execute()
 {
@@ -251,32 +324,8 @@ UncollidedProblem::Execute()
     std::vector<std::set<std::pair<size_t, double>>> cell_successors(num_loc_cells);
     PopulateCellRelationships(pt_loc, cell_successors);
 
-    // Create local cell graph
-    Graph local_cell_graph(num_loc_cells);
-
-    for (size_t c = 0; c < num_loc_cells; ++c)
-      for (const auto& successor : cell_successors[c])
-        boost::add_edge(c, successor.first, successor.second, local_cell_graph);
-
-    // Generate topological ordering
-    spls_.clear();
-    boost::topological_sort(local_cell_graph, std::back_inserter(spls_)); // NOLINT
-    std::reverse(spls_.begin(), spls_.end());
-    if (spls_.empty())
-    {
-      throw std::logic_error("UncollidedProblem: Cyclic dependencies found "
-                             "in the local cell graph.");
-    }
-
-    // Separate SPLS into near-source and bulk region
-    near_spls_.clear(); bulk_spls_.clear();
-
-    for (size_t c : spls_) 
-    {
-      const auto& cell = grid_->local_cells[c];
-      if ( near_source_logvols_[ipt]->Inside(cell.centroid) ) near_spls_.push_back(c);
-      else                                                    bulk_spls_.push_back(c);
-    }
+    // Construct SPLS vectors
+    ConstructSPLS(cell_successors, ipt);
     
     // Calculate uncollided flux
     RaytraceNearSourceRegion(pt);
