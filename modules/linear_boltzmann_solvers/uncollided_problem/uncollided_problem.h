@@ -100,10 +100,13 @@ protected:
   std::vector<std::vector<FaceOrientation>> cell_face_orientations_;
   /// Uncollided sweep-plane local subgrid.
   std::vector<size_t> spls_;
+  std::vector<std::vector<std::uint32_t>> levelized_spls_ {};
   /// Near source uncollided sweep-plane local subgrid.
   std::vector<size_t> near_spls_;
+  std::vector<std::vector<std::uint32_t>> levelized_near_spls_ {};
   /// Bulk region uncollided sweep-plane local subgrid.
   std::vector<size_t> bulk_spls_;
+  std::vector<std::vector<std::uint32_t>> levelized_bulk_spls_ {};
 
   DenseMatrix<double> G_, M_surf_, M_;
   std::vector<Vector<double>> Phi_;
