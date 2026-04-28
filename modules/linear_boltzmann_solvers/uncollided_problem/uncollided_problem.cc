@@ -9,7 +9,6 @@
 #include "framework/math/quadratures/quadrature_order.h"
 #include "framework/math/quadratures/angular/legendre_poly/legendrepoly.h"
 #include "framework/logging/log.h"
-#include "framework/logging/log_exceptions.h"
 #include "framework/utils/timer.h"
 #include "framework/utils/utils.h"
 #include "framework/utils/hdf_utils.h"
@@ -28,11 +27,11 @@ namespace opensn
 
 OpenSnRegisterObjectInNamespace(lbs, UncollidedProblem);
 
-UncollidedProblem::UncollidedProblem(const std::string& name,
-                                     std::shared_ptr<MeshContinuum> grid_ptr)
-  : LBSProblem(name, grid_ptr)
-{
-}
+// UncollidedProblem::UncollidedProblem(const std::string& name,
+//                                      std::shared_ptr<MeshContinuum> grid_ptr)
+//   : LBSProblem(name, grid_ptr)
+// {
+// }
 
 InputParameters
 UncollidedProblem::GetInputParameters()
@@ -71,7 +70,7 @@ UncollidedProblem::UncollidedProblem(const InputParameters& params)
 {
   num_moments_ = 1;
 
-  LBSProblem::Initialize();
+  LBSProblem::BuildRuntime();
 
   InitializeNearSourceRegions(params);
 
@@ -348,7 +347,6 @@ UncollidedProblem::Execute()
         }
       }
     }
-    LBSProblem::UpdateFieldFunctions();
 
     // Update balance parameters
     UpdateBalance(pt);

@@ -699,7 +699,6 @@ DiscreteOrdinatesProblem::InitializeFCS()
           continue;
 
         const auto& S_ell = transfer_matrices[ell];
-        const auto rho = densities_local_[cell.local_id];
         for (size_t i = 0; i < num_nodes; ++i)
         {
           const auto file_uk_map = (file_cell_offset + i) * num_groups_;
@@ -709,7 +708,7 @@ DiscreteOrdinatesProblem::InitializeFCS()
             double rhs = 0.0;
             for (const auto& [_, gp, sigma_sm] : S_ell.Row(g))
             {
-              rhs += rho * sigma_sm * uncollided_moment[file_uk_map + gp];
+              rhs += sigma_sm * uncollided_moment[file_uk_map + gp];
             }
 
             ext_src_moments_local_[lhs_uk_map + g] += rhs;

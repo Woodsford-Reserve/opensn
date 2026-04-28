@@ -32,12 +32,7 @@ public:
 
   ~UncollidedProblem() override;
 
-  void ZeroSolutions() override {}
-
 protected:
-  explicit UncollidedProblem(const std::string& name,
-                             std::shared_ptr<MeshContinuum> grid_ptr);
-
   void PrintSimHeader() override;
 
   void InitializeSpatialDiscretization() override;

@@ -140,6 +140,12 @@ public:
   // Compute total flux from uncollided and collided fluxes
   void ComputeFluxFromUncollided();
 
+  // Do uncollided flux calculation
+  bool DoUncollidedProblem() const 
+  {
+    return do_uncollided_;
+  }
+
 protected:
   /// Factory-only constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
@@ -218,6 +224,8 @@ protected:
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
 
   void InitializeFCS();
+
+  bool do_uncollided_ = false;
 
 private:
   std::string

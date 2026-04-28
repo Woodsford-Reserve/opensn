@@ -10,19 +10,12 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/smm_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
-<<<<<<< HEAD
-#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/uncollided_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/io/discrete_ordinates_problem_io.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/transient_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/steady_state_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/pi_keigen_solver.h"
-=======
 #include "modules/linear_boltzmann_solvers/uncollided_problem/uncollided_problem.h"
-#include "modules/linear_boltzmann_solvers/solvers/steady_state_solver.h"
-#include "modules/linear_boltzmann_solvers/solvers/nl_keigen_solver.h"
-#include "modules/linear_boltzmann_solvers/solvers/pi_keigen_solver.h"
->>>>>>> f6d2bc254 (Sweep order calculation working.)
 #include "modules/linear_boltzmann_solvers/lbs_problem/io/lbs_problem_io.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/compute/lbs_compute.h"
