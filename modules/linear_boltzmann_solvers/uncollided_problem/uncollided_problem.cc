@@ -1300,32 +1300,60 @@ UncollidedProblem::RaytraceNearSourceRegion(const SourcePoint& source_point)
     // Save leakage through cell faces
     leakages.emplace(c, cell_leakage);
 
-    // Mass matrix times least-squares flux vector
-    std::vector<Vector<double>> phi(num_groups_, Vector<double>(cell_num_nodes, 0.));
-    for (const auto& qp : fe_vol_data.GetQuadraturePointIndices())
+    // Source cell
+    bool is_source_cell = false;
+    for (const auto& subscriber : source_point.subscribers)
     {
-      // Raytrace to point
-      Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
-
-      std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, source_point);
-
-      for (unsigned int i = 0; i < cell_num_nodes; ++i)
+      if (subscriber.cell_local_id == c)
       {
-        // Integrand value at quadrature point
-        double integrand =
-          (*swf)(fe_vol_data.QPointXYZ(qp)) * fe_vol_data.ShapeValue(i, qp) * fe_vol_data.JxW(qp);
-
-        // Compute group-wise least-squares fluxes
-        for (size_t g = 0; g < num_groups_; ++g)
-          phi[g](i) += phi_qp[g] * integrand;
+        is_source_cell = true;
+        break;
       }
     }
 
-    // Invert mass matrix
-    for (size_t g = 0; g < num_groups_; ++g)
+    // Ray-traced solution in cell
+    std::vector<Vector<double>> phi(num_groups_, Vector<double>(cell_num_nodes, 0.));
+
+    // Source cell treatment
+    if (is_source_cell)
+    { 
+      const std::vector<double> phi_tmp = RaytraceSourceCell(cell, cell_mapping, source_point);
+
+      // Use constant approximation in source cell
+      for (size_t g = 0; g < num_groups_; ++g)
+        for (size_t i = 0; i < cell_num_nodes; ++i)
+          phi[g](i) = phi_tmp[g]; 
+    }
+
+    // Non-source cell treatment
+    else
     {
-      auto mass_matrix = unit_cell_matrices_[c].intV_shapeI_shapeJ;
-      GaussElimination(mass_matrix, phi[g], static_cast<int>(cell_num_nodes));
+      // Mass matrix times least-squares flux vector
+      for (const auto& qp : fe_vol_data.GetQuadraturePointIndices())
+      {
+        // Raytrace to point
+        Vector3 qp_xyz = fe_vol_data.QPointXYZ(qp);
+
+        std::vector<double> phi_qp = RaytraceLine(ray_tracer, cell, qp_xyz, source_point);
+
+        for (unsigned int i = 0; i < cell_num_nodes; ++i)
+        {
+          // Integrand value at quadrature point
+          double integrand =
+            (*swf)(fe_vol_data.QPointXYZ(qp)) * fe_vol_data.ShapeValue(i, qp) * fe_vol_data.JxW(qp);
+
+          // Compute group-wise least-squares fluxes
+          for (size_t g = 0; g < num_groups_; ++g)
+            phi[g](i) += phi_qp[g] * integrand;
+        }
+      }
+
+      // Invert mass matrix
+      for (size_t g = 0; g < num_groups_; ++g)
+      {
+        auto mass_matrix = unit_cell_matrices_[c].intV_shapeI_shapeJ;
+        GaussElimination(mass_matrix, phi[g], static_cast<int>(cell_num_nodes));
+      }
     }
 
     // Transport view
@@ -1509,6 +1537,108 @@ UncollidedProblem::RaytraceLine(RayTracer& ray_tracer,
   scratch_bp.reserve(8);
   RaytraceLineInto(
     ray_tracer, cell, qp_xyz, source_point, phi, scratch_segs, scratch_bp, scratch_mfp, tolerance);
+  return phi;
+}
+
+std::vector<double>
+UncollidedProblem::RaytraceSourceCell(const Cell& cell,
+                                      const CellMapping& cell_mapping,
+                                      const SourcePoint& source_point,
+                                      double tolerance)
+{
+  const bool is_2d = (grid_->GetDimension() == 2);
+  const double denom = is_2d ? 2. * M_PI : 4. * M_PI;
+
+  const double vol = cell.volume;
+  const auto& sigma_t = cell_transport_views_[cell.local_id].GetXS().GetSigmaTotal();
+
+  std::vector<double> phi(num_groups_, 0.);
+
+  // Point source data
+  const Vector3& pt_loc = source_point.location;
+  const std::vector<double>& strength = source_point.strength;
+
+  // Loop over sub-cells consisting of cell face and source point
+  for (size_t f = 0; f < cell.faces.size(); ++f)
+  {
+    const auto& face = cell.faces[f];
+    const auto& vertex_ids = face.vertex_ids;
+
+    double sub_vol = 0.;
+    double solid_angle = 0.;
+
+    // Compute area and angle of triangular sub-cell
+    if (is_2d)
+    {
+      const auto& pt_A = grid_->vertices[vertex_ids[0]];
+      const auto& pt_B = grid_->vertices[vertex_ids[1]];
+
+      const auto a = pt_A - pt_loc;
+      const auto b = pt_B - pt_loc;
+
+      sub_vol = 0.5 * a.Cross(b).Norm();
+      solid_angle = std::atan2(a.Cross(b).Norm(), a.Dot(b));
+    }
+
+    // Compute volume and solid angle of tetrahedral sub-cell
+    else
+    {
+      const auto& pt_A = grid_->vertices[vertex_ids[0]];
+      const auto& pt_B = grid_->vertices[vertex_ids[1]];
+      const auto& pt_C = grid_->vertices[vertex_ids[2]];
+
+      const auto a = (pt_A - pt_loc).Normalized();
+      const auto b = (pt_B - pt_loc).Normalized();
+      const auto c = (pt_C - pt_loc).Normalized();
+
+      sub_vol = (1./6.) * std::abs(
+        (pt_A - pt_loc).Dot((pt_B - pt_loc).Cross(pt_C - pt_loc))
+      );
+
+      solid_angle = 2. * std::atan2(
+        std::abs(a.Dot(b.Cross(c))), 
+        1. + a.Dot(b) + b.Dot(c) + c.Dot(a)
+      );
+    }
+
+    // Skip sub-cells with volume
+    if (sub_vol < tolerance) continue;
+
+    // Ray-trace to face quadrature points
+    const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
+
+    for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+    {
+      const auto& qp_xyz = fe_srf_data.QPointXYZ(qp);
+      const double qw = fe_srf_data.JxW(qp) / face.area;
+
+      const double r = (qp_xyz - pt_loc).Norm();
+
+      // Compute volume-integrated fluxes within sub-cell
+      for (size_t g = 0; g < num_groups_; ++g)
+      {
+        // Vacuum source cell
+        if (sigma_t[g] < tolerance)
+        {
+          phi[g] += strength[g] / denom * r 
+                  * qw * solid_angle;
+        }
+
+        // Non-vacuum source cell
+        else
+        {
+          phi[g] += strength[g] / (denom * sigma_t[g]) 
+                  * (1. - std::exp(-sigma_t[g] * r)) 
+                  * qw * solid_angle;
+        }
+      } // for g
+    } // for qp
+  } // for f
+
+  // Normalize by cell volume
+  for (size_t g = 0; g < num_groups_; ++g)
+    phi[g] /= vol;
+
   return phi;
 }
 

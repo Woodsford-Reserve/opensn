@@ -119,6 +119,11 @@ protected:
                         std::vector<double>& scratch_mfp,
                         double tolerance = 1.0e-12);
 
+  std::vector<double> RaytraceSourceCell(const Cell& cell,
+                                         const CellMapping& cell_mapping,
+                                         const SourcePoint& source_point,
+                                         double tolerance = 1.0e-12);
+
   void SweepBulkRegion(const SourcePoint& source_point);
 
   UncollidedMatrices ComputeUncollidedIntegrals(const Cell& cell, const Vector3& pt_loc);
