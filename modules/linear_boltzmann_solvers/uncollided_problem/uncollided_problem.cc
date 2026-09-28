@@ -1563,6 +1563,7 @@ UncollidedProblem::RaytraceSourceCell(const Cell& cell,
   {
     const auto& face = cell.faces[f];
     const auto& vertex_ids = face.vertex_ids;
+    const auto& normal = face.normal;
 
     double sub_vol = 0.;
     double solid_angle = 0.;
@@ -1604,15 +1605,40 @@ UncollidedProblem::RaytraceSourceCell(const Cell& cell,
     // Skip sub-cells with volume
     if (sub_vol < tolerance) continue;
 
-    // Ray-trace to face quadrature points
     const auto fe_srf_data = cell_mapping.MakeSurfaceFiniteElementData(f);
 
+    // Solid angle quadrature weights
+    std::vector<double> quad_wts(fe_srf_data.GetQuadraturePointIndices().size(), 0.);
+
+    size_t q = 0;
+    double wt_sum = 0.;
     for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
     {
       const auto& qp_xyz = fe_srf_data.QPointXYZ(qp);
-      const double qw = fe_srf_data.JxW(qp) / face.area;
 
+      const auto& omega = ComputeOmega(pt_loc, qp_xyz);
       const double r = (qp_xyz - pt_loc).Norm();
+
+      const double wt = fe_srf_data.JxW(qp) * std::abs(omega.Dot(normal)) 
+                      / (is_2d ? r : r*r);
+
+      quad_wts[q] = wt;
+      wt_sum += wt;
+      q++; 
+    }
+
+    for (size_t q = 0; q < quad_wts.size(); ++q)
+      quad_wts[q] *= solid_angle / wt_sum;
+
+    // Ray-trace to face quadrature points
+    q = 0;
+    for (const auto& qp : fe_srf_data.GetQuadraturePointIndices())
+    {
+      const auto& qp_xyz = fe_srf_data.QPointXYZ(qp);
+
+      const auto& omega = ComputeOmega(pt_loc, qp_xyz);
+      const double r = (qp_xyz - pt_loc).Norm();
+      const double qw = quad_wts[q];
 
       // Compute volume-integrated fluxes within sub-cell
       for (size_t g = 0; g < num_groups_; ++g)
@@ -1620,18 +1646,17 @@ UncollidedProblem::RaytraceSourceCell(const Cell& cell,
         // Vacuum source cell
         if (sigma_t[g] < tolerance)
         {
-          phi[g] += strength[g] / denom * r 
-                  * qw * solid_angle;
+          phi[g] += strength[g] / denom * r * quad_wts[q];
         }
 
         // Non-vacuum source cell
         else
         {
           phi[g] += strength[g] / (denom * sigma_t[g]) 
-                  * (1. - std::exp(-sigma_t[g] * r)) 
-                  * qw * solid_angle;
+                  * (1. - std::exp(-sigma_t[g] * r)) * quad_wts[q];
         }
       } // for g
+      q++;
     } // for qp
   } // for f
 
