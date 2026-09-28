@@ -487,6 +487,97 @@ WrapLBS(py::module& slv)
     py::arg("file_base")
   );
   lbs_problem.def(
+    "WriteSurfaceAngularFluxes",
+    [](DiscreteOrdinatesProblem& self,
+       const std::string& file_base,
+       const std::vector<std::string>& boundary_surfaces,
+       const std::map<std::string, std::pair<std::string, double>>& interior_surfaces)
+    {
+      DiscreteOrdinatesProblemIO::WriteSurfaceAngularFluxes(
+        self, file_base, boundary_surfaces, interior_surfaces);
+    },
+    R"(
+    Write surface angular flux data to file.
+
+    Parameters
+    ----------
+    file_base: str
+        File basename.
+    boundary_surfaces: list[str], default=[]
+        Boundary names to export.
+    interior_surfaces: dict[str, tuple[str, float]], default={}
+        Interior surfaces in the form {'name': ('axis', value)}, where axis is 'x', 'y', or 'z'.
+        Each interior surface is written under two tags: '<name>_u' for faces whose outward normal
+        aligns with the positive axis and '<name>_d' for faces with the opposite orientation.
+        An interior surface may not coincide with an exterior boundary; export that boundary by
+        name using boundary_surfaces instead.
+    )",
+    py::arg("file_base"),
+    py::arg("boundary_surfaces") = std::vector<std::string>{},
+    py::arg("interior_surfaces") = std::map<std::string, std::pair<std::string, double>>{}
+  );
+  lbs_problem.def(
+    "ReadSurfaceAngularFluxes",
+    [](DiscreteOrdinatesProblem& self, const std::string& file_base, py::list surfaces)
+    {
+      std::vector<std::string> surface_ids;
+      for (py::handle surface : surfaces)
+        surface_ids.push_back(surface.cast<std::string>());
+
+      const auto surface_fluxes =
+        DiscreteOrdinatesProblemIO::ReadSurfaceAngularFluxes(self, file_base, surface_ids);
+      py::list result;
+      for (const auto& surface_flux : surface_fluxes)
+      {
+        py::dict mapping;
+        mapping["cell_ids"] = surface_flux.mapping.cell_ids;
+        mapping["num_face_nodes"] = surface_flux.mapping.num_face_nodes;
+        mapping["cell_map"] = surface_flux.mapping.cell_map;
+        mapping["cell_stride"] = surface_flux.mapping.cell_stride;
+        mapping["nodes_x"] = surface_flux.mapping.nodes_x;
+        mapping["nodes_y"] = surface_flux.mapping.nodes_y;
+        mapping["nodes_z"] = surface_flux.mapping.nodes_z;
+
+        py::dict data;
+        data["omega"] = surface_flux.data.omega;
+        data["mu"] = surface_flux.data.mu;
+        data["wt_d"] = surface_flux.data.wt_d;
+        data["M_ij"] = surface_flux.data.mass_matrix;
+        data["fe_shape"] = surface_flux.data.fe_shape;
+        data["psi"] = surface_flux.data.psi;
+        data["node_index"] = surface_flux.data.node_index;
+        data["dir_index"] = surface_flux.data.dir_index;
+
+        py::dict entry;
+        entry["groupset_id"] = surface_flux.groupset_id;
+        entry["surface_name"] = surface_flux.surface_name;
+        entry["mapping"] = std::move(mapping);
+        entry["data"] = std::move(data);
+        result.append(std::move(entry));
+      }
+      return result;
+    },
+    R"(
+    Read surface angular fluxes from file.
+
+    Parameters
+    ----------
+    file_base: str
+        File basename.
+    surfaces: list[str]
+        Stored surface tags to read. Use the boundary name for an exterior boundary. For an
+        interior surface named '<name>', use '<name>_u' for faces whose outward normal aligns with
+        the positive axis and '<name>_d' for faces with the opposite orientation.
+
+    Returns
+    -------
+    List[dict]
+        Surface mapping and angular-flux data for each groupset and requested surface.
+    )",
+    py::arg("file_base"),
+    py::arg("surfaces")
+  );
+  lbs_problem.def(
     "SetPointSources",
     [](LBSProblem& self, py::kwargs& params)
     {
@@ -890,6 +981,7 @@ WrapLBS(py::module& slv)
           - time_function: AngularFluxTimeFunction, optional
               Required when ``type='arbitrary'`` unless ``function`` is supplied. Callable that
               returns incoming angular flux from group, direction, and time.
+
         Isotropic boundaries may use ``start_time``/``end_time`` for simple on/off behavior.
         Arbitrary boundaries must specify exactly one of ``function`` or ``time_function``; use
         ``time_function`` for time-dependent arbitrary inflow and handle any active window inside
@@ -948,6 +1040,7 @@ WrapLBS(py::module& slv)
           - power_default_kappa: float, default=3.20435e-11
           - field_function_prefix_option: {'prefix', 'solver_name'}, default='prefix'
           - field_function_prefix: str, default=''
+
         These options are applied at problem creation.
     sweep_type : str, default="AAH"
         The sweep type to use. Must be one of `AAH` or `CBC`. Defaults to `AAH`.
@@ -1058,6 +1151,7 @@ WrapLBS(py::module& slv)
           - time_function: AngularFluxTimeFunction, optional
               Required when ``type='arbitrary'`` unless ``function`` is supplied. Callable that
               returns incoming angular flux from group, direction, and time.
+
         Isotropic boundaries may use ``start_time``/``end_time`` for simple on/off behavior.
         Arbitrary boundaries must specify exactly one of ``function`` or ``time_function``; use
         ``time_function`` for time-dependent arbitrary inflow and handle any active window inside
@@ -1400,6 +1494,7 @@ WrapLBS(py::module& slv)
           - time_function: AngularFluxTimeFunction, optional
               Required when ``type='arbitrary'`` unless ``function`` is supplied. Callable that
               returns incoming angular flux from group, direction, and time.
+
         Isotropic boundaries may use ``start_time``/``end_time`` for simple on/off behavior.
         Arbitrary boundaries must specify exactly one of ``function`` or ``time_function``; use
         ``time_function`` for time-dependent arbitrary inflow and handle any active window inside
@@ -1746,12 +1841,10 @@ WrapTransient(py::module& slv)
     R"(
     Register a callback that runs before each advance within :meth:`Execute`.
 
-    Parameters
-    ----------
-    callback : Optional[Callable[[], None]]
-        Function invoked before the solver advances a timestep. Pass None to clear.
-        If the callback modifies the timestep, the new value is used for the
+    :param callback: Function invoked before the solver advances a timestep. Pass None
+        to clear. If the callback modifies the timestep, the new value is used for the
         upcoming step.
+    :type callback: Optional[Callable[[], None]]
     )");
   transient_solver.def(
     "SetPreAdvanceCallback",
@@ -1764,10 +1857,9 @@ WrapTransient(py::module& slv)
     R"(
     Register a callback that runs after each advance within :meth:`Execute`.
 
-    Parameters
-    ----------
-    callback : Optional[Callable[[], None]]
-        Function invoked after the solver advances a timestep. Pass None to clear.
+    :param callback: Function invoked after the solver advances a timestep. Pass None
+        to clear.
+    :type callback: Optional[Callable[[], None]]
     )");
   transient_solver.def(
     "SetPostAdvanceCallback",
@@ -2253,6 +2345,7 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
             - 'identity' : one CMFD coarse cell per transport cell
             - 'local_aggregation' : connected same-block fine cells aggregated locally
             - 'global_aggregation' : connected same-block fine cells aggregated across MPI ranks
+
         ``"local_aggregation"`` is the conservative default. ``"global_aggregation"`` can
         reduce the coarse problem size on larger distributed meshes. Global aggregation is a
         logical CMFD coarse-space construction: it does not repartition the transport mesh or
@@ -2266,6 +2359,7 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
             - 'auto' : choose net, partial, or a blend from early coarse-balance behavior
             - 'net' : match the signed transport current across each coarse face
             - 'partial' : build face coupling from outgoing partial currents on both sides
+
         ``"auto"`` is recommended for production use. A fixed closure is useful when
         comparing methods, reproducing a benchmark setting, or diagnosing a case where
         automatic selection is not robust.
@@ -2351,6 +2445,7 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
             - 'direct' : PETSc preonly+LU
             - 'iterative' : GMRES+Jacobi
             - 'petsc_options' : allow ``petsc_options`` to override the PETSc KSP/PC setup
+
         CMFD corrections from unconverged coarse linear solves are always skipped.
         The skipped correction uses the unaccelerated transport update for that power
         iteration, including the raw transport k update so that power iteration can continue
