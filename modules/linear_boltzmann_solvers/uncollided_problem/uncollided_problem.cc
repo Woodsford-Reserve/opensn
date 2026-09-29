@@ -1574,8 +1574,8 @@ UncollidedProblem::RaytraceSourceCell(const Cell& cell,
     // Compute area and angle of triangular sub-cell
     if (is_2d)
     {
-      const auto& pt_A = grid_->vertices[vertex_ids[0]];
-      const auto& pt_B = grid_->vertices[vertex_ids[1]];
+      const auto& pt_A = grid_->GlobalVertex(vertex_ids[0]);
+      const auto& pt_B = grid_->GlobalVertex(vertex_ids[1]);
 
       const auto a = pt_A - pt_loc;
       const auto b = pt_B - pt_loc;
@@ -1587,9 +1587,9 @@ UncollidedProblem::RaytraceSourceCell(const Cell& cell,
     // Compute volume and solid angle of tetrahedral sub-cell
     else
     {
-      const auto& pt_A = grid_->vertices[vertex_ids[0]];
-      const auto& pt_B = grid_->vertices[vertex_ids[1]];
-      const auto& pt_C = grid_->vertices[vertex_ids[2]];
+      const auto& pt_A = grid_->GlobalVertex(vertex_ids[0]);
+      const auto& pt_B = grid_->GlobalVertex(vertex_ids[1]);
+      const auto& pt_C = grid_->GlobalVertex(vertex_ids[2]);
 
       const auto a = (pt_A - pt_loc).Normalized();
       const auto b = (pt_B - pt_loc).Normalized();
